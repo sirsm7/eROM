@@ -1,0 +1,120 @@
+/* === Gaya asas === */
+:root{
+  --bg:#f6f8fb;--text:#111827;--muted:#6b7280;--primary:#2563eb;
+  --ok:#16a34a;--warn:#f59e0b;--bad:#dc2626;--off:#9ca3af;
+  --card:#fff;--ring:#e5e7eb
+}
+html,body{margin:0;padding:0;background:var(--bg);color:var(--text);font-family:'Oswald',Arial,sans-serif}
+.wrap{max-width:1150px;margin:18px auto;padding:12px}
+h1{font-size:1.5rem;margin:.25rem 0 .75rem}
+
+/* === Tabs === */
+.tabs{display:flex;gap:8px;border-bottom:1px solid var(--ring);margin-bottom:10px;flex-wrap:wrap}
+.tabbtn{border:1px solid var(--ring);border-bottom:none;background:#f8fafc;color:#111827;padding:10px 14px;border-top-left-radius:12px;border-top-right-radius:12px;cursor:pointer}
+.tabbtn.active{background:#fff;border-color:var(--ring);font-weight:600}
+.tabpane{display:none}.tabpane.active{display:block}
+
+/* === Card & forms === */
+.row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.card{background:var(--card);border:1px solid var(--ring);border-radius:14px;padding:12px;box-shadow:0 2px 10px rgba(0,0,0,.04)}
+select,input[type="time"],input[type="text"],input[type="date"],button{font-family:inherit;font-size:1rem;border:1px solid var(--ring);border-radius:10px;padding:8px 10px;background:#fff;outline:none}
+select:focus,input:focus{box-shadow:0 0 0 3px rgba(37,99,235,.15)}
+.btn{border:none;background:var(--primary);color:#fff;padding:10px 16px;border-radius:12px;cursor:pointer;transition:.2s}
+.btn.secondary{background:#111827}.btn.ghost{background:#fff;border:1px solid var(--ring);color:#111827}
+.small{font-size:.85rem;color:var(--muted)}
+.req::after{content:" *";color:#dc2626}
+.invalid{box-shadow:0 0 0 3px rgba(220,38,38,.18) !important;border-color:#dc2626 !important}
+
+/* === Legend & calendar === */
+.legend{display:flex;gap:12px;align-items:center;margin:8px 0 4px;flex-wrap:wrap}
+.dot{width:14px;height:14px;border-radius:4px;display:inline-block;border:1px solid #0001}
+.dot.green{background:var(--ok)} .dot.orange{background:var(--warn)} .dot.red{background:var(--bad)} .dot.disabled{background:var(--off)}
+.calendar{display:grid;grid-template-rows:auto 1fr;gap:8px}
+.weekday{display:grid;grid-template-columns:repeat(7,1fr);gap:8px;font-size:.9rem;color:var(--muted)} .weekday div{text-align:center}
+.grid{display:grid;grid-template-columns:repeat(7,1fr);gap:8px}
+.tile{background:var(--card);border:1px solid var(--ring);border-radius:12px;min-height:118px;position:relative;overflow:hidden;display:flex;flex-direction:column}
+.tile.disabled{background:#f3f4f6;color:#9ca3af;pointer-events:none}
+.tile .date{font-size:1rem;font-weight:600;padding:8px 10px;display:flex;align-items:center;gap:8px}
+.badge{display:inline-block;border-radius:999px;padding:3px 8px;font-size:.75rem;line-height:1;color:#fff}
+.badge.red{background:var(--bad)} .badge.orange{background:var(--warn)} .badge.green{background:var(--ok)}
+.counts{margin-left:auto;font-size:.75rem;color:#374151;background:#eef2f7;border:1px solid var(--ring);border-radius:999px;padding:2px 8px}
+.tile .body{padding:0 10px 10px;font-size:.95rem;line-height:1.2}
+.listRooms{max-height:96px;overflow-y:auto;padding-bottom:2px}
+.pill{display:inline-block;padding:2px 8px;border-radius:999px;font-size:.78rem;border:1px solid var(--ring);margin:2px 4px 2px 0}
+.pill.red{background:rgba(220,38,38,.10);border-color:rgba(220,38,38,.25);color:#991b1b}
+.pill.orange{background:rgba(245,158,11,.10);border-color:rgba(245,158,11,.25);color:#92400e}
+.grid .blank{visibility:hidden}
+.sel{outline:3px solid rgba(37,99,235,.35)}
+.tile.range{outline:3px solid rgba(37,99,235,.35)}
+.toolbar{display:grid;grid-template-columns:1fr auto auto;gap:10px;align-items:center}
+.monthnav{display:flex;gap:8px;align-items:center}
+.switch{display:inline-flex;background:#eef2f7;border:1px solid var(--ring);border-radius:10px;overflow:hidden}
+.switch button{padding:6px 12px;border:none;background:transparent;cursor:pointer}
+.switch button.active{background:#fff}
+.counter{font-size:.9rem;color:#111827;background:#f1f5f9;border:1px solid var(--ring);padding:6px 10px;border-radius:10px;display:inline-block}
+
+/* === Table in overview/admin === */
+table{width:100%;border-collapse:collapse;border:1px solid var(--ring)}
+th,td{padding:8px;border-bottom:1px solid var(--ring);text-align:left;font-size:.95rem;vertical-align:top}
+th{background:#f8fafc}
+.tag{display:inline-block;padding:2px 8px;border-radius:999px;font-size:.78rem;border:1px solid var(--ring);background:#f1f5f9}
+.tag.red{background:rgba(220,38,38,.10);border-color:rgba(220,38,38,.25);color:#991b1b}
+.tag.orange{background:rgba(245,158,11,.10);border-color:rgba(245,158,11,.25);color:#92400e}
+
+#ovSummaryWrap{margin-top:12px;border-top:1px dashed var(--ring);padding-top:10px}
+#ovSummaryList{columns:3; column-gap:20px}
+@media (max-width:900px){ #ovSummaryList{columns:1} }
+
+/* Admin lock */
+#adminLoginBox{display:block}
+#adminPanel{display:none}
+
+/* === Admin Edit Modal === */
+.btn-icon{
+  background:transparent;
+  border:none;
+  cursor:pointer;
+  font-size:1.1rem;
+  padding:4px 8px;
+  border-radius:6px;
+  margin:0;
+  line-height:1;
+}
+.btn-icon:hover{
+  background:#f1f5f9;
+}
+.swal-form{
+  display:grid;
+  grid-template-columns:1fr 1fr;
+  gap:12px;
+  text-align:left;
+}
+.swal-form label{
+  font-size:.9rem;
+  color:#374151;
+  margin-bottom:4px;
+  display:block;
+  font-weight:600;
+}
+.swal-form .full-width{
+  grid-column: 1 / -1;
+}
+.swal-form input,
+.swal-form select{
+  width:100%;
+  box-sizing:border-box;
+}
+/* Pastikan input SweetAlert selaras dengan gaya borang */
+.swal2-input, .swal2-select {
+  font-family:inherit !important;
+  font-size:1rem !important;
+  border:1px solid var(--ring) !important;
+  border-radius:10px !important;
+  padding:8px 10px !important;
+  background:#fff !important;
+  outline:none !important;
+  margin:0 !important;
+}
+.swal2-input:focus, .swal2-select:focus {
+  box-shadow:0 0 0 3px rgba(37,99,235,.15) !important;
+}
