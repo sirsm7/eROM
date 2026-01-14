@@ -50,11 +50,12 @@ h1 {
   gap: 15px; /* Jarak antara logo dan teks */
 }
 
-/* Gaya Logo KPM */
+/* Gaya Logo KPM - Desktop */
 .header-logo {
-  height: 48px; /* Tinggi logo yang sesuai */
+  height: 48px; /* Tinggi standard desktop */
   width: auto;
-  filter: drop-shadow(0 2px 4px rgba(0,0,0,0.2)); /* Sedikit bayang untuk timbul */
+  filter: drop-shadow(0 2px 4px rgba(0,0,0,0.2)); 
+  flex-shrink: 0; /* PENTING: Elak logo kemek bila teks panjang */
 }
 
 @media (min-width: 769px) {
@@ -199,7 +200,7 @@ select:focus, input:focus {
   color: var(--text);
 }
 
-/* New Compact Counts for Overview */
+/* Compact Counts for Overview */
 .cnt-group {
   display: inline-flex;
   gap: 4px;
@@ -262,15 +263,20 @@ tr:last-child td { border-bottom: none; }
   h1 { 
     margin: 0 0 16px 0; 
     border-radius: 0 0 20px 20px; 
-    padding: 24px 20px; 
+    padding: 16px 20px; /* Kurangkan padding atas/bawah */
     text-align: left; 
-    font-size: 1.1rem; /* Kecilkan sikit font header di mobile */
-    line-height: 1.4;
-    flex-direction: column; /* Logo atas, teks bawah jika perlu, atau kekal row */
-    align-items: flex-start; /* Kiri rata */
-    flex-direction: row; /* Kekal sebaris */
+    font-size: 1.1rem; 
+    line-height: 1.35;
+    flex-direction: row; /* Pastikan kekal sebaris */
+    align-items: center; /* Center vertically */
+    gap: 12px; /* Rapatkan gap sikit */
   }
-  .header-logo { height: 40px; } /* Kecilkan logo sikit di mobile */
+  
+  .header-logo { 
+    height: 32px; /* SAIZ BARU: Lebih kecil & proporsional untuk mobile */
+    width: auto;
+    flex-shrink: 0; /* PENTING: Logo takkan kemek walau teks panjang */
+  }
   
   .card { 
     border-radius: 12px;
