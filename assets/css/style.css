@@ -118,3 +118,162 @@ th{background:#f8fafc}
 .swal2-input:focus, .swal2-select:focus {
   box-shadow:0 0 0 3px rgba(37,99,235,.15) !important;
 }
+
+/* ========================================= */
+/* === MOBILE OPTIMIZATION (RESPONSIVE) === */
+/* ========================================= */
+
+@media (max-width: 768px) {
+  /* 1. Layout Asas */
+  .wrap { margin: 0; width: 100%; max-width: 100%; border-radius: 0; padding: 10px; box-sizing: border-box; }
+  .card { border-radius: 8px; padding: 10px; }
+  h1 { font-size: 1.25rem; text-align: center; }
+
+  /* 2. Navigasi Tab (Swipeable) */
+  .tabs { 
+    flex-wrap: nowrap; 
+    overflow-x: auto; 
+    padding-bottom: 5px; 
+    -webkit-overflow-scrolling: touch; 
+    gap: 6px;
+  }
+  .tabbtn { 
+    flex: 0 0 auto; 
+    font-size: 0.9rem; 
+    padding: 8px 12px; 
+  }
+  /* Sorok scrollbar tabs tapi kekal boleh scroll */
+  .tabs::-webkit-scrollbar { height: 0px; background: transparent; }
+
+  /* 3. Borang & Input (Full Width Stack) */
+  .row, .toolbar { 
+    display: flex; 
+    flex-direction: column; 
+    align-items: stretch; 
+    gap: 12px; 
+  }
+  /* Override toolbar grid layout */
+  .toolbar { grid-template-columns: 1fr; }
+  
+  .row > div, 
+  .toolbar > div { 
+    width: 100% !important; 
+    min-width: 0 !important;
+    margin: 0 !important;
+  }
+
+  /* Besarkan input untuk jari */
+  select, input[type="time"], input[type="text"], input[type="date"], button, .btn {
+    width: 100%;
+    box-sizing: border-box;
+    min-height: 44px; /* Standard saiz sentuhan minimum */
+    font-size: 16px; /* Elak iOS zoom automatik */
+  }
+  
+  /* Month Navigator Center */
+  .monthnav { 
+    justify-content: space-between; 
+    width: 100%; 
+  }
+  
+  /* 4. Kalendar: Tukar Grid ke Senarai (Agenda View) */
+  .weekday { display: none; } /* Sorok header hari (Isn, Sel...) */
+  .grid { 
+    grid-template-columns: 1fr; /* 1 lajur sahaja */
+    gap: 10px;
+  }
+  .grid .blank { display: none; } /* Sorok kotak kosong */
+  
+  .tile {
+    min-height: auto; /* Tak perlu tinggi tetap */
+    flex-direction: column; /* Tarikh di atas, isi di bawah */
+    align-items: flex-start;
+  }
+  
+  /* Gaya khas untuk 'List Item' kalendar */
+  .tile .date {
+    width: 100%;
+    background: #f9fafb;
+    border-bottom: 1px solid var(--ring);
+    padding: 6px 10px;
+    justify-content: space-between;
+  }
+  /* Tambah label 'Hari' supaya jelas */
+  .tile .date::before {
+    /* Pilihan: Boleh letak ikon kalendar jika mahu */
+    content: "Tarikh: ";
+    font-size: 0.8rem;
+    color: var(--muted);
+    font-weight: normal;
+    margin-right: 4px;
+  }
+
+  .tile .body {
+    padding: 10px;
+    width: 100%;
+    box-sizing: border-box;
+  }
+
+  /* 5. Jadual: Tukar Table ke Cards */
+  table, thead, tbody, th, td, tr { display: block; }
+  thead { display: none; } /* Sorok header jadual */
+  
+  /* Setiap baris jadual jadi 'Kad' */
+  tr { 
+    margin-bottom: 12px; 
+    border: 1px solid var(--ring); 
+    border-radius: 8px; 
+    background: #fff; 
+    box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+    overflow: hidden;
+  }
+  
+  /* Sel dalam kad */
+  td {
+    border-bottom: 1px solid #f1f5f9;
+    padding: 8px 12px;
+    position: relative;
+    padding-left: 40%; /* Ruang untuk label */
+    text-align: right;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    min-height: 30px;
+  }
+  
+  td:last-child { border-bottom: none; }
+
+  /* Suntik Label Secara CSS (Tanpa ubah JS) */
+  td::before { 
+    position: absolute;
+    left: 12px;
+    width: 35%;
+    white-space: nowrap;
+    text-align: left;
+    font-weight: 600;
+    font-size: 0.85rem;
+    color: var(--muted);
+  }
+
+  /* === Label Khas: Rumusan Jadual (Tab 2) === */
+  /* Kolum: Tarikh, Masa, Bilik, Tujuan, Penempah */
+  #ovTableBody td:nth-of-type(1)::before { content: "Tarikh"; }
+  #ovTableBody td:nth-of-type(2)::before { content: "Masa"; }
+  #ovTableBody td:nth-of-type(3)::before { content: "Bilik"; }
+  #ovTableBody td:nth-of-type(4)::before { content: "Tujuan"; }
+  #ovTableBody td:nth-of-type(5)::before { content: "Penempah"; }
+
+  /* === Label Khas: Admin List (Tab 3) === */
+  /* Kolum: Checkbox, Tarikh, Masa, Bilik, Kategori, Tujuan, Penempah, Tindakan */
+  #adminList td:nth-of-type(1) { text-align: left; padding-left: 12px; background: #f8fafc; } /* Checkbox header */
+  #adminList td:nth-of-type(2)::before { content: "Tarikh"; }
+  #adminList td:nth-of-type(3)::before { content: "Masa"; }
+  #adminList td:nth-of-type(4)::before { content: "Bilik"; }
+  #adminList td:nth-of-type(5)::before { content: "Kategori"; }
+  #adminList td:nth-of-type(6)::before { content: "Tujuan"; }
+  #adminList td:nth-of-type(7)::before { content: "Penempah"; }
+  #adminList td:nth-of-type(8) { justify-content: flex-end; background: #f8fafc; } /* Butang Edit */
+
+  /* 6. Admin Modal (SweetAlert) di Mobile */
+  .swal-form { grid-template-columns: 1fr; }
+}

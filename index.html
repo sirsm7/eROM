@@ -2,7 +2,7 @@
 <html lang="ms">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
   <title>eROM@AG — Sistem Pengurusan Tempahan Bilik PPD Alor Gajah</title>
   
   <link rel="icon" href="assets/img/logo-kpm.png" type="image/png" />
@@ -15,7 +15,7 @@
   <!-- SweetAlert2 -->
   <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
 
-  <!-- Gaya utama -->
+  <!-- Gaya utama (Mobile Optimized) -->
   <link rel="stylesheet" href="./assets/css/style.css">
 </head>
 <body>
@@ -257,14 +257,6 @@
   <script>
     window.API_E_ROM_BASE = "https://script.google.com/macros/s/AKfycbxByCNkhvvKjiDLKme8HxxW0JSSR34EeHOyrXs8-epyBkhtL7Xk6AUFzS9lQ058B83K/exec";
   </script>
-
-  <!-- Rujukan: inisialisasi Supabase lama telah diganti oleh adapter GAS
-  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js"></script>
-  <script>
-    window.SUPABASE_URL = "...";
-    window.SUPABASE_ANON_KEY = "...";
-  </script>
-  -->
 
   <!-- Adapter GAS mesti dimuat sebelum app.js -->
   <script type="module" src="./src/api/supabaseClient.js"></script>
