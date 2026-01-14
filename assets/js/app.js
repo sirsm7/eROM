@@ -176,7 +176,6 @@ async function getMonthBookingsList({ year, month }) {
     .from('v_bookings_active')
     .select('tarikh, masa_mula, masa_tamat, bilik, kategori, tujuan, nama_penempah, sektor')
     .gte('tarikh', from).lte('tarikh', to)
-    // .order() di bawah tidak berfungsi kerana adapter GAS. Susunan ditambah di client-side.
     .order('tarikh', { ascending: true })
     .order('masa_mula', { ascending: true });
   if (error) throw error;
@@ -192,15 +191,12 @@ async function getMonthBookingsList({ year, month }) {
     sektor: r.sektor
   }));
 
-  // === PERUBAHAN DI SINI ===
-  // Susun secara client-side: Tarikh terkini (descending), kemudian Masa terkini (descending)
   items.sort((a, b) => {
     if (a.date !== b.date) {
-      return b.date.localeCompare(a.date); // b vs a = descending
+      return b.date.localeCompare(a.date);
     }
-    return b.start.localeCompare(a.start); // b vs a = descending
+    return b.start.localeCompare(a.start);
   });
-  // === TAMAT PERUBAHAN ===
   
   return { items };
 }
@@ -242,7 +238,6 @@ async function listUpcomingBookings({ room }){
     .select('booking_id, tarikh, masa_mula, masa_tamat, bilik, kategori, tujuan, nama_penempah, sektor')
     .eq('bilik', room)
     .gte('tarikh', today)
-    // .order() di bawah tidak berfungsi kerana adapter GAS. Susunan ditambah di client-side.
     .order('tarikh',{ascending:true})
     .order('masa_mula',{ascending:true});
   if (error) throw error;
@@ -256,15 +251,12 @@ async function listUpcomingBookings({ room }){
     nama:r.nama_penempah, sektor:r.sektor
   }));
 
-  // === PERUBAHAN DI SINI ===
-  // Susun secara client-side: Tarikh terkini (descending), kemudian Masa terkini (descending)
   items.sort((a, b) => {
     if (a.date !== b.date) {
-      return b.date.localeCompare(a.date); // b vs a = descending
+      return b.date.localeCompare(a.date);
     }
-    return b.start.localeCompare(a.start); // b vs a = descending
+    return b.start.localeCompare(a.start);
   });
-  // === TAMAT PERUBAHAN ===
   
   return { items };
 }
@@ -624,23 +616,34 @@ function renderOverview(){
     $('ovSummaryWrap').style.display='none';
   }
 }
+
+/* === [KEMASKINI] Paparan Rumusan yang lebih padat === */
 function renderOvCalendar(){
   const grid = $('ovGrid'); grid.innerHTML='';
   const lastDayOfMonth = new Date(ov.year, ov.month, 0).getDate();
   const firstDow = (new Date(ov.year, ov.month - 1, 1).getDay() + 6) % 7; // 0=Isnin
   for(let i=0;i<firstDow;i++){ const x=document.createElement('div'); x.className='blank'; grid.appendChild(x); }
   const dayMap = new Map((ov.days||[]).map(d => [d.date, d]));
+  
   for(let d=1; d<=lastDayOfMonth; d++){
     const ymd = `${ov.year}-${pad2(ov.month)}-${pad2(d)}`;
     const dayData = dayMap.get(ymd);
     const tile = document.createElement('div'); tile.className = 'tile';
+    
+    // Header Tarikh
     const top = document.createElement('div'); top.className='date'; top.textContent = d;
+    
+    // KEMASKINI: Guna Badge (Pills) bukannya teks panjang
     if (dayData && (dayData.counts?.red || dayData.counts?.orange)) {
-      const cnt = document.createElement('span'); cnt.className='counts';
-      cnt.textContent = `Penuh:${dayData.counts.red||0} | Separa:${dayData.counts.orange||0}`;
-      top.appendChild(cnt);
+      const div = document.createElement('div'); div.className='cnt-group';
+      // Hanya tunjuk jika nilai > 0 untuk lebih kemas
+      if(dayData.counts.red > 0) div.innerHTML += `<span class="cnt-pill red">P:${dayData.counts.red}</span>`;
+      if(dayData.counts.orange > 0) div.innerHTML += `<span class="cnt-pill orange">S:${dayData.counts.orange}</span>`;
+      top.appendChild(div);
     }
+    
     tile.appendChild(top);
+    
     const body = document.createElement('div'); body.className='body';
     if (dayData?.rooms?.length){
       const list = document.createElement('div'); list.className='listRooms';
