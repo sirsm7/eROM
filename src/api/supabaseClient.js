@@ -1,5 +1,7 @@
 // src/api/supabaseClient.js
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+
+// KEMASKINI: Menggunakan JSDelivr (CDN Mesra GovNet/KPM) menggantikan esm.sh
+import { createClient } from "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm";
 
 // KONFIGURASI SUPABASE SELF-HOSTED (BAHARU)
 // Menggunakan URL: https://appppdag.cloud

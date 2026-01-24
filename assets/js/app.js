@@ -308,12 +308,29 @@ async function bootstrap(){
     lockAdmin();
     populateNamaOptions();
     toggleCalendarHint();
+    
+    // PEMBAIKAN GOVNET FRIENDLY: Mula-mula cuba muat data
+    // Jika gagal, blok 'catch' di bawah akan menganalisis ralat
     await loadOverview(true);
+    
     modalClose();
     toastOk('Aplikasi sedia digunakan');
   }catch(err){
     modalClose();
-    modalError('Gagal memuat', err.message);
+    // DETEKTOR FIREWALL:
+    // Jika ralat berkaitan rangkaian (fetch failed), beri amaran khusus
+    if (err.message && (err.message.includes('Failed to fetch') || err.message.includes('NetworkError'))) {
+       Swal.fire({
+         icon: 'error',
+         title: 'Akses Disekat',
+         html: 'Talian internet anda mungkin menyekat akses ke pangkalan data (Firewall Kerajaan/KPM).<br><br><b>Sila cuba tukar ke data mudah alih (Hotspot) untuk akses.</b>',
+         footer: 'Kod Ralat: ERR_NETWORK_BLOCK',
+         allowOutsideClick: false,
+         confirmButtonText: 'Faham'
+       });
+    } else {
+       modalError('Gagal memuat', err.message);
+    }
   }
 }
 
@@ -587,7 +604,8 @@ async function loadOverview(showLoading){
     if(showLoading){ modalClose(); toastOk('Rumusan dikemas kini'); }
   }catch(err){ 
     if(showLoading) modalClose(); 
-    modalError('Gagal memuat rumusan', err.message); 
+    // Lempar ralat ke atas supaya 'bootstrap' boleh tangkap (untuk detektor GovNet)
+    throw err;
   }
 }
 function switchOverviewView(view){
@@ -601,9 +619,9 @@ function switchOverviewView(view){
   const tableDataLoaded = ov.bookings && ov.bookings.length > 0;
 
   if (ov.view === 'calendar' && !calDataLoaded) {
-    loadOverview(true);
+    loadOverview(true).catch(err => modalError('Gagal memuat', err.message));
   } else if (ov.view === 'table' && !tableDataLoaded) {
-    loadOverview(true);
+    loadOverview(true).catch(err => modalError('Gagal memuat', err.message));
   } else {
     renderOverview();
   }
