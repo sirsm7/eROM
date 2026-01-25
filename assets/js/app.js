@@ -7,8 +7,8 @@ const SHOW_PAST_DAYS = false;
 /* ========= Konstanta bilik & kategori ========= */
 const ROOM_OPTIONS = [
   "PKG Ganun - Bilik Kursus (30 orang)",
-  "PKG Melekek - Bilik Kuliah (25 orang)",      // Nama telah dikemaskini
-  "PKG Melekek - Bilik Mesyuarat (25 orang)",   // Bilik baharu ditambah
+  "PKG Melekek - Bilik Kuliah (25 orang)",      
+  "PKG Melekek - Bilik Mesyuarat (25 orang)",   
   "PKG Masjid Tanah - Bilik Seri Cempaka (24 orang)",
   "PKG Masjid Tanah - Bilik Seri Melur (18 orang)",
   "PKG Masjid Tanah - Bilik Pendidikan Digital (12 orang)",
@@ -46,11 +46,11 @@ const firstDay = (y,m)=> `${y}-${pad2(m)}-01`;
 const lastDay  = (y,m)=> toYMD(new Date(Date.UTC(y,m,0)));
 const todayYMD = ()=> toYMD(new Date());
 
-/* ===== [TAMBAH] Normalisasi masa & tarikh ===== */
+/* ===== Normalisasi masa & tarikh ===== */
 function toHHMM(x){
   if (x == null) return "";
   const s = String(x).trim();
-  if (/^\d{2}:\d{2}/.test(s)) return s.slice(0,5);              // "09:00" atau "09:00:00"
+  if (/^\d{2}:\d{2}/.test(s)) return s.slice(0,5);              
   const d = new Date(s);
   if (!isNaN(d)) return `${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
   const m = s.match(/(\d{1,2}):(\d{2})/);
@@ -92,7 +92,7 @@ async function getInit(){
 /* ===== Kalendar bilik (Tempahan) ===== */
 async function getMonthView({ room, year, month }){
   const from = firstDay(year, month), to = lastDay(year, month);
-  // Gunakan VIEW v_bookings_active yang telah dibuat di SQL
+  // KEMASKINI: View v_bookings_active kini menggunakan nama kolum Melayu sepenuhnya
   const { data, error } = await supa
     .from('v_bookings_active')
     .select('tarikh, masa_mula, masa_tamat, kategori, tujuan')
@@ -321,16 +321,13 @@ async function bootstrap(){
     populateNamaOptions();
     toggleCalendarHint();
     
-    // PEMBAIKAN GOVNET FRIENDLY: Mula-mula cuba muat data
-    // Jika gagal, blok 'catch' di bawah akan menganalisis ralat
     await loadOverview(true);
     
     modalClose();
     toastOk('Aplikasi sedia digunakan');
   }catch(err){
     modalClose();
-    // DETEKTOR FIREWALL:
-    // Jika ralat berkaitan rangkaian (fetch failed), beri amaran khusus
+    // DETEKTOR FIREWALL
     if (err.message && (err.message.includes('Failed to fetch') || err.message.includes('NetworkError'))) {
        Swal.fire({
          icon: 'error',

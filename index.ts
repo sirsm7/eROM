@@ -17,8 +17,8 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 // Senarai bilik mestilah SAMA SEBIJI dengan yang ada di laman web
 const ROOM_OPTIONS = [
   "PKG Ganun - Bilik Kursus (30 orang)",
-  "PKG Melekek - Bilik Kuliah (25 orang)",      // Dikemaskini
-  "PKG Melekek - Bilik Mesyuarat (25 orang)",   // Ditambah
+  "PKG Melekek - Bilik Kuliah (25 orang)",      
+  "PKG Melekek - Bilik Mesyuarat (25 orang)",   
   "PKG Masjid Tanah - Bilik Seri Cempaka (24 orang)",
   "PKG Masjid Tanah - Bilik Seri Melur (18 orang)",
   "PKG Masjid Tanah - Bilik Pendidikan Digital (12 orang)",
@@ -88,7 +88,6 @@ function closeKeyboard() {
 }
 
 function roomsKeyboard(rooms) {
-  // Potong nama bilik jika terlalu panjang untuk callback_data (limit 64 bytes)
   const rows = rooms.map(r => [{ text: r, callback_data: `pick:${r.substring(0, 50)}` }]);
   rows.push([{ text: "Tutup", callback_data: "close" }]);
   return { inline_keyboard: rows };
@@ -98,17 +97,16 @@ function roomsKeyboard(rooms) {
 // 4. LOGIK DATABASE (erom_pic)
 // ==========================================
 async function getTakenRooms() {
+  // Kolum table erom_pic ialah 'bilik'
   const { data, error } = await supabase.from("erom_pic").select("bilik");
   if (error || !data) return new Set();
   return new Set(data.map(r => r.bilik));
 }
 
 async function assignRoom(telegramId, username, roomPart) {
-  // Cari nama penuh bilik berdasarkan serpihan nama
   const fullRoomName = ROOM_OPTIONS.find(r => r.startsWith(roomPart));
   if (!fullRoomName) return { ok: false, reason: "Bilik tidak ditemui dalam sistem." };
 
-  // Semak jika bilik sudah ada PIC lain
   const { data: existing, error: errExist } = await supabase
     .from("erom_pic")
     .select("bilik")
@@ -118,7 +116,6 @@ async function assignRoom(telegramId, username, roomPart) {
   if (errExist) return { ok: false, reason: errExist.message };
   if (existing && existing.length > 0) return { ok: false, reason: "Maaf, bilik ini sudah mempunyai PIC." };
 
-  // Daftar PIC baru
   const { error } = await supabase.from("erom_pic").insert([{
     telegram_id: telegramId,
     telegram_username: username ?? null,
@@ -144,13 +141,11 @@ async function listMyRooms(telegramId) {
 // 5. SISTEM NOTIFIKASI (CHANNEL & DM)
 // ==========================================
 async function sendBookingNotification(payload) {
-  // Jika tiada Channel ID, abaikan
   if (!CHANNEL_ID) return;
 
   const record = payload.record;
-  const eventType = payload.type; // 'INSERT' atau 'UPDATE'
+  const eventType = payload.type;
   
-  // Tentukan Tajuk & Status berdasarkan jenis event
   let title = "📢 TEMPAHAN BARU";
   let statusEmoji = "🟢";
   
@@ -164,15 +159,14 @@ async function sendBookingNotification(payload) {
     }
   }
 
-  // Cari Maklumat PIC Bilik ini
-  // KEMASKINI: Menggunakan 'record.bilik' kerana kolum DB telah ditukar dari 'room' ke 'bilik'
+  // KEMASKINI: Menggunakan nama kolum BM (bilik)
   let picUsername = "Tiada PIC";
   let picId = null;
 
   const { data: picData } = await supabase
     .from("erom_pic")
     .select("telegram_username, telegram_id")
-    .eq("bilik", record.bilik) // Penyeragaman: room -> bilik
+    .eq("bilik", record.bilik) // Updated: bilik
     .single();
 
   if (picData) {
@@ -180,26 +174,24 @@ async function sendBookingNotification(payload) {
     if (picData.telegram_id) picId = picData.telegram_id;
   }
 
-  // Format Mesej
-  // KEMASKINI: Menggunakan ${record.bilik}
+  // KEMASKINI: Membaca kolum BM dari payload (tarikh, masa_mula, masa_tamat, tujuan, nama_penempah, sektor)
+  // Kerana kita dah run SQL Rename Column
   const msg = `
 <b>${title}</b> ${statusEmoji}
 
 🏛 <b>Bilik:</b> ${record.bilik}
-📅 <b>Tarikh:</b> ${record.booking_date}
-⏰ <b>Masa:</b> ${record.start_time.slice(0,5)} - ${record.end_time.slice(0,5)}
-📝 <b>Tujuan:</b> ${record.purpose}
-👤 <b>Penempah:</b> ${record.booker_name}
-🏢 <b>Sektor:</b> ${record.sector}
+📅 <b>Tarikh:</b> ${record.tarikh}
+⏰ <b>Masa:</b> ${record.masa_mula.slice(0,5)} - ${record.masa_tamat.slice(0,5)}
+📝 <b>Tujuan:</b> ${record.tujuan}
+👤 <b>Penempah:</b> ${record.nama_penempah}
+🏢 <b>Sektor:</b> ${record.sektor}
 👮 <b>PIC Bilik:</b> ${picUsername}
 
 <i>Sila layari <a href="${APP_URL}">eROM Web</a> untuk maklumat lanjut.</i>
 `;
 
-  // A. Hantar ke Channel Utama (Public Log)
   await sendMessage(CHANNEL_ID, msg);
 
-  // B. Hantar DM ke PIC (Personal Alert) - Hanya jika PIC wujud
   if (picId) {
     const privateMsg = `🔔 <b>Notifikasi PIC</b>\n\nSatu aktiviti telah berlaku pada bilik jagaan anda:\n${msg}\n\n<i>Sila pantau tempahan ini.</i>`;
     await sendMessage(picId, privateMsg);
@@ -278,14 +270,12 @@ async function handleStatus(msg) {
 // 7. SERVER UTAMA (DENO ENTRY POINT)
 // ==========================================
 Deno.serve(async (req) => {
-  // Hanya terima method POST (Telegram & Supabase hantar POST)
   if (req.method !== "POST") return new Response("Bot Active (Root)");
 
   try {
     const payload = await req.json();
 
     // --- SENARIO A: ISYARAT DARI SUPABASE (WEBHOOK) ---
-    // Menyemak jika payload ada 'record' dan 'table' == 'erom_bookings'
     if ((payload.type === 'INSERT' || payload.type === 'UPDATE') && payload.table === 'erom_bookings') {
       console.log(`Menerima Webhook Supabase: ${payload.type}`);
       await sendBookingNotification(payload);
@@ -293,8 +283,6 @@ Deno.serve(async (req) => {
     }
 
     // --- SENARIO B: ISYARAT DARI TELEGRAM (USER) ---
-    
-    // 1. Mesej Teks (/start, /bilik, /status)
     if (payload.message) {
       const msg = payload.message;
       const chatId = msg.chat.id;
@@ -307,13 +295,11 @@ Deno.serve(async (req) => {
       } else if (text.startsWith("/status")) {
         await handleStatus(msg);
       } else {
-        // Default response jika teks tidak dikenali
         await handleStart(chatId);
       }
       return new Response("OK");
     }
     
-    // 2. Callback Query (Butang ditekan)
     if (payload.callback_query) {
       const cb = payload.callback_query;
       const data = cb.data ?? "";
