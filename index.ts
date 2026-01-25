@@ -165,13 +165,14 @@ async function sendBookingNotification(payload) {
   }
 
   // Cari Maklumat PIC Bilik ini
+  // KEMASKINI: Menggunakan 'record.bilik' kerana kolum DB telah ditukar dari 'room' ke 'bilik'
   let picUsername = "Tiada PIC";
   let picId = null;
 
   const { data: picData } = await supabase
     .from("erom_pic")
     .select("telegram_username, telegram_id")
-    .eq("bilik", record.room)
+    .eq("bilik", record.bilik) // Penyeragaman: room -> bilik
     .single();
 
   if (picData) {
@@ -180,10 +181,11 @@ async function sendBookingNotification(payload) {
   }
 
   // Format Mesej
+  // KEMASKINI: Menggunakan ${record.bilik}
   const msg = `
 <b>${title}</b> ${statusEmoji}
 
-🏛 <b>Bilik:</b> ${record.room}
+🏛 <b>Bilik:</b> ${record.bilik}
 📅 <b>Tarikh:</b> ${record.booking_date}
 ⏰ <b>Masa:</b> ${record.start_time.slice(0,5)} - ${record.end_time.slice(0,5)}
 📝 <b>Tujuan:</b> ${record.purpose}

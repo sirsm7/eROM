@@ -208,18 +208,28 @@ async function adminCheck(pw){
   if (error) throw error;
   return { ok: !!data, isAdmin: !!data };
 }
+
+// KEMASKINI: Menggunakan 'p_bilik' menggantikan 'p_room' untuk penyeragaman
 async function createBooking(args){
   const { data, error } = await supa.rpc('fn_create_booking', {
-    p_room: args.room, p_date: args.date, p_start: args.start, p_end: args.end,
-    p_category: args.category, p_note: args.note, p_sektor: args.sektor, p_nama: args.nama
+    p_bilik: args.room, // Updated: param name standardized
+    p_date: args.date, 
+    p_start: args.start, 
+    p_end: args.end,
+    p_category: args.category, 
+    p_note: args.note, 
+    p_sektor: args.sektor, 
+    p_nama: args.nama
   });
   if (error) throw error;
   if (!data?.ok) throw new Error(data?.error || 'Gagal menyimpan');
   return data;
 }
+
+// KEMASKINI: Menggunakan 'p_bilik' menggantikan 'p_room' untuk penyeragaman
 async function createBookingRange(args){
   const { data, error } = await supa.rpc('fn_create_booking_range', {
-    p_room: args.room,
+    p_bilik: args.room, // Updated: param name standardized
     p_from: args.startDate,
     p_to: args.endDate,
     p_start: args.start,
@@ -233,6 +243,7 @@ async function createBookingRange(args){
   if (!data?.ok) throw new Error(data?.error || 'Gagal menyimpan julat');
   return data;
 }
+
 async function listUpcomingBookings({ room }){
   const today = todayYMD();
   const { data, error } = await supa
