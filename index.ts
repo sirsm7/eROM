@@ -138,13 +138,92 @@ async function listMyRooms(telegramId) {
 }
 
 // ==========================================
-// 5. SISTEM NOTIFIKASI (CHANNEL & DM)
+// 5. SISTEM PENGUMPULAN WEBHOOK (DEBOUNCE)
 // ==========================================
-async function sendBookingNotification(payload) {
-  if (!CHANNEL_ID) return;
+const BM_MONTHS = ["Januari", "Februari", "Mac", "April", "Mei", "Jun", "Julai", "Ogos", "September", "Oktober", "November", "Disember"];
+const webhookBuffer = new Map();
 
+function parseTarikh(ymd) {
+  const [y, m, d] = ymd.split('-');
+  return { year: parseInt(y), month: parseInt(m) - 1, day: parseInt(d) };
+}
+
+function formatTarikhBM(tarikhArray) {
+  if (!tarikhArray || tarikhArray.length === 0) return "Tiada Tarikh";
+  if (tarikhArray.length === 1) {
+    const t = parseTarikh(tarikhArray[0]);
+    return `${t.day} ${BM_MONTHS[t.month]} ${t.year}`;
+  }
+
+  // Isih tarikh untuk kepastian urutan mula hingga akhir
+  tarikhArray.sort((a, b) => a.localeCompare(b));
+
+  const first = parseTarikh(tarikhArray[0]);
+  const last = parseTarikh(tarikhArray[tarikhArray.length - 1]);
+
+  if (first.year !== last.year) {
+    // Tahun Berbeza (Cth: 31 Disember 2026 - 2 Januari 2027)
+    return `${first.day} ${BM_MONTHS[first.month]} ${first.year} - ${last.day} ${BM_MONTHS[last.month]} ${last.year}`;
+  } else if (first.month !== last.month) {
+    // Bulan Berbeza (Cth: 30 April - 2 Mei 2026)
+    return `${first.day} ${BM_MONTHS[first.month]} - ${last.day} ${BM_MONTHS[last.month]} ${first.year}`;
+  } else {
+    // Bulan & Tahun Sama (Cth: 15 - 17 April 2026)
+    return `${first.day} - ${last.day} ${BM_MONTHS[first.month]} ${first.year}`;
+  }
+}
+
+function processWebhookToBuffer(payload) {
   const record = payload.record;
-  const eventType = payload.type;
+  const type = payload.type;
+
+  // Kenalpasti jenis webhook (Insert = Baru, Update + Dibatalkan = Batal Pukal/Biasa)
+  const isInsert = type === 'INSERT';
+  const isCancel = type === 'UPDATE' && record.status === 'DIBATALKAN';
+
+  // Kemaskini biasa (Tukar masa, tujuan dll) tidak perlu digumpal. Hantar terus.
+  if (!isInsert && !isCancel) {
+    sendBookingNotification([record], type, false);
+    return;
+  }
+
+  // Kunci pengumpulan (Grouping Key)
+  const actionPrefix = isCancel ? 'CANCEL' : 'NEW';
+  // Gabungkan ciri-ciri yang sama untuk pastikan ini adalah kumpulan tempahan yang sama
+  const groupKey = `${actionPrefix}|${record.bilik}|${record.masa_mula}|${record.masa_tamat}|${record.tujuan}|${record.nama_penempah}`;
+
+  if (webhookBuffer.has(groupKey)) {
+    const buffered = webhookBuffer.get(groupKey);
+    buffered.records.push(record);
+    // Kosongkan dan set semula pemasa (debounce) setiap kali webhook baharu masuk
+    clearTimeout(buffered.timerId);
+    buffered.timerId = setTimeout(() => flushBuffer(groupKey), 2500); // Tahan 2.5 saat
+  } else {
+    const timerId = setTimeout(() => flushBuffer(groupKey), 2500);
+    webhookBuffer.set(groupKey, { type, records: [record], timerId });
+  }
+}
+
+async function flushBuffer(groupKey) {
+  const buffered = webhookBuffer.get(groupKey);
+  if (!buffered) return;
+  webhookBuffer.delete(groupKey); // Kosongkan buffer untuk kumpulan ini
+
+  // Pastikan rekod disusun mengikut tarikh sebelum diproses untuk notifikasi
+  buffered.records.sort((a, b) => a.tarikh.localeCompare(b.tarikh));
+  
+  // Hantar dengan parameter isGrouped = true jika lebih daripada 1
+  await sendBookingNotification(buffered.records, buffered.type, buffered.records.length > 1);
+}
+
+// ==========================================
+// 6. SISTEM NOTIFIKASI (CHANNEL & DM)
+// ==========================================
+async function sendBookingNotification(records, eventType, isGrouped) {
+  if (!CHANNEL_ID || !records || records.length === 0) return;
+
+  // Ambil sampel data rekod (sebab bilik, tujuan dll adalah sama dalam kumpulan)
+  const record = records[0]; 
   
   let title = "📢 TEMPAHAN BARU";
   let statusEmoji = "🟢";
@@ -159,14 +238,17 @@ async function sendBookingNotification(payload) {
     }
   }
 
-  // KEMASKINI: Menggunakan nama kolum BM (bilik)
+  // Ubah tajuk jika ia adalah tempahan/pembatalan pukal berturut
+  if (isGrouped && eventType === 'INSERT') title = "📢 TEMPAHAN BERTURUT";
+  if (isGrouped && record.status === 'DIBATALKAN') title = "❌ PEMBATALAN PUKAL";
+
   let picUsername = "Tiada PIC";
   let picId = null;
 
   const { data: picData } = await supabase
     .from("erom_pic")
     .select("telegram_username, telegram_id")
-    .eq("bilik", record.bilik) // Updated: bilik
+    .eq("bilik", record.bilik)
     .single();
 
   if (picData) {
@@ -174,13 +256,16 @@ async function sendBookingNotification(payload) {
     if (picData.telegram_id) picId = picData.telegram_id;
   }
 
-  // KEMASKINI: Membaca kolum BM dari payload (tarikh, masa_mula, masa_tamat, tujuan, nama_penempah, sektor)
-  // Kerana kita dah run SQL Rename Column
+  // Format tarikh baharu
+  const arrTarikh = records.map(r => r.tarikh);
+  const strTarikh = formatTarikhBM(arrTarikh);
+  const hariBekerjaText = isGrouped ? ` <i>(${records.length} hari bekerja)</i>` : '';
+
   const msg = `
 <b>${title}</b> ${statusEmoji}
 
 🏛 <b>Bilik:</b> ${record.bilik}
-📅 <b>Tarikh:</b> ${record.tarikh}
+📅 <b>Tarikh:</b> ${strTarikh}${hariBekerjaText}
 ⏰ <b>Masa:</b> ${record.masa_mula.slice(0,5)} - ${record.masa_tamat.slice(0,5)}
 📝 <b>Tujuan:</b> ${record.tujuan}
 👤 <b>Penempah:</b> ${record.nama_penempah}
@@ -199,7 +284,7 @@ async function sendBookingNotification(payload) {
 }
 
 // ==========================================
-// 6. PENGENDALI ARAHAN (HANDLERS)
+// 7. PENGENDALI ARAHAN (HANDLERS)
 // ==========================================
 async function handleStart(chatId) {
   await sendMessage(chatId, "<b>eROM@AG Bot</b>\nSelamat datang. Sila pilih peranan anda:", {
@@ -267,7 +352,7 @@ async function handleStatus(msg) {
 }
 
 // ==========================================
-// 7. SERVER UTAMA (DENO ENTRY POINT)
+// 8. SERVER UTAMA (DENO ENTRY POINT)
 // ==========================================
 Deno.serve(async (req) => {
   if (req.method !== "POST") return new Response("Bot Active (Root)");
@@ -278,8 +363,9 @@ Deno.serve(async (req) => {
     // --- SENARIO A: ISYARAT DARI SUPABASE (WEBHOOK) ---
     if ((payload.type === 'INSERT' || payload.type === 'UPDATE') && payload.table === 'erom_bookings') {
       console.log(`Menerima Webhook Supabase: ${payload.type}`);
-      await sendBookingNotification(payload);
-      return new Response("Notified");
+      // Proses melalui sistem penimbal (buffer/debounce)
+      processWebhookToBuffer(payload);
+      return new Response("Notified - Buffer processing started");
     }
 
     // --- SENARIO B: ISYARAT DARI TELEGRAM (USER) ---
