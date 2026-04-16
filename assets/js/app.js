@@ -108,7 +108,8 @@ let ov = {
   days:[], // Untuk calendar view (stats bilik)
   bookings:[], // Untuk table view (senarai penuh)
   view:'calendar', 
-  filterRoom:'' 
+  filterRoom:'',
+  filterUser:'' // State baru untuk tapisan pengguna
 };
 
 let adminState = {
@@ -188,7 +189,26 @@ function setupUI(){
   // Overview
   $('btnViewCalendar').addEventListener('click', ()=>switchOverviewView('calendar'));
   $('btnViewTable').addEventListener('click', ()=>switchOverviewView('table'));
-  $('ovRoomFilter').addEventListener('change', ()=>{ ov.filterRoom = $('ovRoomFilter').value; renderOvTable(); });
+  
+  // Filter Bilik Overview & Penjanaan Filter Nama Automatik
+  $('ovRoomFilter').addEventListener('change', ()=>{ 
+    ov.filterRoom = $('ovRoomFilter').value; 
+    ov.filterUser = ''; // Reset user filter
+    const userFilterEl = $('ovUserFilter');
+    if(userFilterEl) userFilterEl.value = '';
+    
+    populateUserFilter();
+    renderOvTable(); 
+  });
+
+  // Filter User Overview
+  const userFilterEl = $('ovUserFilter');
+  if(userFilterEl) {
+    userFilterEl.addEventListener('change', () => {
+      ov.filterUser = userFilterEl.value;
+      renderOvTable();
+    });
+  }
 
   // Admin
   if($('adminRefreshUsers')) $('adminRefreshUsers').addEventListener('click', loadAdminUserList);
@@ -231,6 +251,11 @@ function resetUI(){
   // Reset Overview ke bulan semasa
   ov.year = now.getFullYear();
   ov.month = now.getMonth()+1;
+  ov.filterRoom = '';
+  ov.filterUser = '';
+  $('ovRoomFilter').value = '';
+  if($('ovUserFilter')) $('ovUserFilter').value = '';
+  
   $('ovMonthLabel').textContent = formatMonthLabel(ov.year, ov.month);
   loadOverview(true);
 }
@@ -377,6 +402,11 @@ function onLoginSuccess(){
 
   state.isAdmin = (state.user.role === 'ADMIN');
   
+  // Tunjuk penapis penempah jika ada user auth
+  const ovUserWrap = $('ovUserFilterWrap');
+  if(ovUserWrap) ovUserWrap.style.display = 'block';
+  populateUserFilter();
+  
   if(state.isAdmin) {
     $('tabAdminBtn').style.display = 'inline-block';
     if($('tabAdmin').classList.contains('active')){
@@ -388,10 +418,8 @@ function onLoginSuccess(){
   
   toggleBookingForm(true);
   
-  // PENTING: Paksa render semula jadual untuk kemaskini butang "Delete"
-  // berdasarkan peranan pengguna yang baru log masuk.
+  // PENTING: Paksa render semula jadual untuk kemaskini butang "Delete / Edit"
   if(ov.view === 'table') {
-    // Kosongkan dahulu untuk elak 'flicker' data lama
     $('ovTableBody').innerHTML = ''; 
     renderOvTable();
   }
@@ -410,14 +438,19 @@ function onLogout(){
   $('adminLoginBox').style.display = 'block';
   $('adminPanel').style.display = 'none';
   
+  // Sembunyikan penapis penempah
+  const ovUserWrap = $('ovUserFilterWrap');
+  if(ovUserWrap) ovUserWrap.style.display = 'none';
+  ov.filterUser = '';
+  if($('ovUserFilter')) $('ovUserFilter').value = '';
+  
   toggleBookingForm(false);
   
   if($('tabAdmin').classList.contains('active')) switchTab('tempahan');
 
   // 3. FORCE CLEAR OVERVIEW TABLE
-  // Ini penting untuk mengelakkan "ghost buttons" (butang delete Admin kekal)
   if(ov.view === 'table') {
-    $('ovTableBody').innerHTML = ''; // Visual wipe serta merta
+    $('ovTableBody').innerHTML = ''; 
     renderOvTable(); // Render semula sebagai guest
   }
   
@@ -879,10 +912,41 @@ async function loadOverview(loading){
   if(loading) modalClose();
   
   ov.bookings = data || [];
+  
   processOverviewData(ov.bookings);
+  populateUserFilter(); // Segarkan dropdown penempah berdasarkan bulan terkini
 
   renderOvTable();
   renderOvCalendar();
+}
+
+// FUNGSI BARU: Janakan opsyen tapisan penempah secara dinamik
+function populateUserFilter() {
+  const filterEl = $('ovUserFilter');
+  if(!filterEl) return;
+  
+  filterEl.innerHTML = '<option value="">— Semua Penempah —</option>';
+
+  // Hanya proses jika pengguna telah log masuk (kerana UI disembunyikan tanpa sesi)
+  if(!state.user) return;
+
+  const today = todayYMD();
+  let validBookings = ov.bookings.filter(b => toYMDNorm(b.tarikh) >= today);
+
+  // Jika bilik ditapis, kecilkan skop pengguna kepada bilik tersebut sahaja
+  if(ov.filterRoom) {
+      validBookings = validBookings.filter(b => b.bilik === ov.filterRoom);
+  }
+
+  // Ekstrak nama pengguna yang unik dan susun secara abjad
+  const uniqueNames = [...new Set(validBookings.map(b => b.nama_penempah))].sort();
+  
+  uniqueNames.forEach(name => {
+      filterEl.appendChild(new Option(name, name));
+  });
+
+  // Pulihkan pilihan sebelumnya jika wujud dalam senarai yang baru dijana
+  filterEl.value = ov.filterUser;
 }
 
 function processOverviewData(bookings){
@@ -938,32 +1002,47 @@ function renderOvTable(){
   tbody.innerHTML = ''; // Pastikan bersih sebelum loop
   
   let list = ov.bookings;
+  const today = todayYMD();
+
+  // KEMASKINI LOGIK: Tapis keluar tarikh yang sudah berlalu (hanya papar semasa dan akan datang)
+  list = list.filter(b => toYMDNorm(b.tarikh) >= today);
+
+  // KEMASKINI LOGIK: Tapis bilik
   if(ov.filterRoom) list = list.filter(b => b.bilik === ov.filterRoom);
+  
+  // KEMASKINI LOGIK: Tapis penempah
+  if(ov.filterUser) list = list.filter(b => b.nama_penempah === ov.filterUser);
 
   if(!list.length){ 
-    tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;padding:15px">Tiada tempahan.</td></tr>'; 
+    tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;padding:15px">Tiada tempahan semasa atau akan datang.</td></tr>'; 
     return; 
   }
 
-  const today = toYMD(new Date()); 
   list.forEach(b => {
     const tr = createEl('tr');
-    const bDate = toYMDNorm(b.tarikh);
-    const isFuture = bDate >= today; 
-
+    
+    // Auth Check
     let canAction = false;
     if(state.user && state.user.role){
        if(state.user.role === 'ADMIN') {
          canAction = true; 
        }
-       else if(state.user.nama === b.nama_penempah && isFuture) {
+       else if(state.user.nama === b.nama_penempah) { // Tarikh pasti future sebab sudah ditapis
          canAction = true;
        }
     }
 
-    const actionHtml = canAction 
-      ? `<button class="btn-icon-del" data-id="${b.booking_id}" title="Batal Tempahan">🗑️</button>` 
-      : `<span style="color:#ccc; font-size:0.8rem;">-</span>`;
+    // KEMASKINI LOGIK: Suntik Butang Edit dan Delete secara serentak
+    let actionHtml = `<span style="color:#ccc; font-size:0.8rem;">-</span>`;
+    
+    if(canAction) {
+      actionHtml = `
+        <div style="display:flex; gap:8px; justify-content:center;">
+          <button class="btn-icon-edit-user" data-id="${b.booking_id}" title="Kemaskini Tempahan">✏️</button>
+          <button class="btn-icon-del" data-id="${b.booking_id}" title="Batal Tempahan">🗑️</button>
+        </div>
+      `;
+    }
 
     tr.innerHTML = `
       <td>${b.tarikh}</td>
@@ -976,8 +1055,14 @@ function renderOvTable(){
     tbody.appendChild(tr);
   });
 
+  // Sambung event listeners
   document.querySelectorAll('.btn-icon-del').forEach(btn => {
     btn.addEventListener('click', () => cancelBooking(btn.dataset.id));
+    btn.style.cssText = "background:none; border:none; cursor:pointer; font-size:1.1rem;";
+  });
+  
+  document.querySelectorAll('.btn-icon-edit-user').forEach(btn => {
+    btn.addEventListener('click', () => openUserEditModal(btn.dataset.id));
     btn.style.cssText = "background:none; border:none; cursor:pointer; font-size:1.1rem;";
   });
 }
@@ -1076,6 +1161,63 @@ async function cancelBooking(id){
       if(state.room) refreshCalendar(false);
     } else {
       Swal.fire('Gagal', data?.error || 'Ralat', 'error');
+    }
+  }
+}
+
+// FUNGSI BARU: Edit tempahan dari tab Rumusan (untuk pengguna)
+async function openUserEditModal(id){
+  const b = ov.bookings.find(x => x.booking_id === id);
+  if(!b) return;
+
+  const { value: form } = await Swal.fire({
+    title: 'Kemaskini Tempahan',
+    html: `
+      <label class="small">Tarikh</label><input id="eDate" type="date" class="swal2-input" value="${toYMDNorm(b.tarikh)}">
+      <label class="small">Masa Mula</label><input id="eStart" type="time" class="swal2-input" value="${toHHMM(b.masa_mula)}">
+      <label class="small">Masa Tamat</label><input id="eEnd" type="time" class="swal2-input" value="${toHHMM(b.masa_tamat)}">
+      <label class="small">Tujuan</label><input id="eNote" class="swal2-input" value="${b.tujuan}">
+    `,
+    showCancelButton: true,
+    confirmButtonText: 'Simpan',
+    preConfirm: () => ({
+      d: $('eDate').value,
+      s: $('eStart').value,
+      e: $('eEnd').value,
+      n: $('eNote').value
+    })
+  });
+
+  if(form){
+    // [SAFETY GUARD] Pengesahan Edit
+    const isConfirmed = await modalConfirm(
+      'Simpan Perubahan?',
+      'Maklumat tempahan asal akan digantikan dengan data baharu.'
+    );
+    if (!isConfirmed) return;
+
+    modalLoading('Menyimpan...');
+    // Gunakan fungsi yang sama seperti admin, ia mengesahkan email pemilik secara automatik.
+    const { data } = await supa.rpc('fn_update_booking_secure', {
+      p_booking_id: id,
+      p_email: state.user.email, 
+      p_date: form.d,
+      p_start: form.s,
+      p_end: form.e,
+      p_category: b.kategori,
+      p_note: form.n,
+      p_sektor: b.sektor,
+      p_nama: b.nama_penempah
+    });
+    modalClose();
+    
+    if(data && data.ok){
+      toastOk('Tempahan berjaya dikemaskini.');
+      loadOverview(false);
+      // Jika tab Tempahan menunjukkan bilik yang sama dengan yang diubahsuai, segarkan kalendarnya juga.
+      if(state.room === b.bilik) refreshCalendar(false);
+    } else {
+      Swal.fire('Ralat', data?.error || 'Ralat tidak diketahui', 'error');
     }
   }
 }
