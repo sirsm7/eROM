@@ -54,6 +54,8 @@
     <div class="tabs">
       <button id="tabTempahanBtn" class="tabbtn active">Tempahan</button>
       <button id="tabKalendarBtn" class="tabbtn">Rumusan Tempahan</button>
+      <!-- Butang Tab Baharu: Tempahan Saya -->
+      <button id="tabTempahanSayaBtn" class="tabbtn" style="display:none">Tempahan Saya</button>
       <button id="tabAdminBtn" class="tabbtn" style="display:none">Pentadbir</button>
     </div>
 
@@ -250,7 +252,39 @@
       </div>
     </section>
 
-    <!-- Tab Admin (STRUKTUR DIBINA SEMULA) -->
+    <!-- Tab Tempahan Saya (BARU) -->
+    <section id="tabTempahanSaya" class="tabpane">
+      <div class="card toolbar">
+        <div>
+          <div class="small" style="font-weight:600; font-size:1rem; color:var(--primary);">Senarai Tempahan Saya</div>
+          <div style="margin-top:4px;" class="small">Urus, kemaskini atau batal tempahan yang anda lakukan di sini.</div>
+        </div>
+        <div style="text-align:right">
+          <button class="btn secondary" id="btnRefreshMyBookings">Segar Semula</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <div style="overflow-x:auto;">
+          <table>
+            <thead>
+              <tr>
+                <th style="width:120px">Tarikh</th>
+                <th style="width:110px">Masa</th>
+                <th>Bilik</th>
+                <th>Tujuan</th>
+                <th style="width:100px; text-align:center;">Tindakan</th>
+              </tr>
+            </thead>
+            <tbody id="myBookingsTableBody">
+              <tr><td colspan="5" style="text-align:center; padding:15px">Sila tunggu sebentar...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- Tab Admin -->
     <section id="tabAdmin" class="tabpane">
       <div class="card">
         

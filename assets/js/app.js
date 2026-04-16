@@ -14,7 +14,7 @@ const ROOM_OPTIONS = [
   "PKG Masjid Tanah - Bilik Pendidikan Digital (12 orang)",
   "Bilik Mesyuarat Utama PPDAG (73 orang)",
   "Bilik Mesyuarat Kecil PPDAG (15 orang)",
-  "Makmal Komputer PPDAG (31 orang)",
+  "Makmal Komputer PPDAG (31 testing)",
   "Bilik Seminar PPDAG (22 orang)",
   "Bilik Temuduga PPDAG (4 orang)",
   "Bilik Runding Cara PPDAG (4 orang)",
@@ -99,7 +99,8 @@ let state = {
   days: [],
   selectedDate: null,
   range:{from:null,to:null}, 
-  rangeMode:false 
+  rangeMode:false,
+  myBookings: [] // State untuk menyimpan tempahan peribadi
 };
 
 let ov = { 
@@ -151,6 +152,7 @@ function setupUI(){
   // Tabs
   $('tabTempahanBtn').addEventListener('click', ()=> switchTab('tempahan'));
   $('tabKalendarBtn').addEventListener('click', ()=> switchTab('kalendar'));
+  $('tabTempahanSayaBtn').addEventListener('click', ()=> switchTab('tempahanSaya'));
   $('tabAdminBtn').addEventListener('click', ()=> switchTab('admin'));
 
   // Tempahan Toolbar
@@ -209,6 +211,9 @@ function setupUI(){
       renderOvTable();
     });
   }
+
+  // My Bookings
+  if($('btnRefreshMyBookings')) $('btnRefreshMyBookings').addEventListener('click', () => loadMyBookings(true));
 
   // Admin
   if($('adminRefreshUsers')) $('adminRefreshUsers').addEventListener('click', loadAdminUserList);
@@ -342,6 +347,7 @@ function resetUserState() {
   // Pastikan isAdmin juga false
   state.isAdmin = false;
   state.user = null;
+  state.myBookings = [];
 }
 
 function restoreSession(){
@@ -402,6 +408,10 @@ function onLoginSuccess(){
 
   state.isAdmin = (state.user.role === 'ADMIN');
   
+  // Tunjuk butang Tempahan Saya
+  const btnMyBookings = $('tabTempahanSayaBtn');
+  if(btnMyBookings) btnMyBookings.style.display = 'inline-block';
+  
   // Tunjuk penapis penempah jika ada user auth
   const ovUserWrap = $('ovUserFilterWrap');
   if(ovUserWrap) ovUserWrap.style.display = 'block';
@@ -417,6 +427,9 @@ function onLoginSuccess(){
   }
   
   toggleBookingForm(true);
+  
+  // Muat data tempahan saya (background)
+  loadMyBookings(false);
   
   // PENTING: Paksa render semula jadual untuk kemaskini butang "Delete / Edit"
   if(ov.view === 'table') {
@@ -438,6 +451,10 @@ function onLogout(){
   $('adminLoginBox').style.display = 'block';
   $('adminPanel').style.display = 'none';
   
+  // Sembunyikan butang Tempahan Saya
+  const btnMyBookings = $('tabTempahanSayaBtn');
+  if(btnMyBookings) btnMyBookings.style.display = 'none';
+  
   // Sembunyikan penapis penempah
   const ovUserWrap = $('ovUserFilterWrap');
   if(ovUserWrap) ovUserWrap.style.display = 'none';
@@ -446,13 +463,19 @@ function onLogout(){
   
   toggleBookingForm(false);
   
-  if($('tabAdmin').classList.contains('active')) switchTab('tempahan');
+  // Kembalikan pengguna ke tab Tempahan jika mereka di tab eksklusif auth
+  if($('tabAdmin').classList.contains('active') || $('tabTempahanSaya').classList.contains('active')) {
+      switchTab('tempahan');
+  }
 
-  // 3. FORCE CLEAR OVERVIEW TABLE
+  // 3. FORCE CLEAR TABLES
   if(ov.view === 'table') {
     $('ovTableBody').innerHTML = ''; 
     renderOvTable(); // Render semula sebagai guest
   }
+  
+  const myBookingsTbody = $('myBookingsTableBody');
+  if(myBookingsTbody) myBookingsTbody.innerHTML = '<tr><td colspan="5" style="text-align:center; padding:15px">Sila log masuk untuk melihat rekod.</td></tr>';
   
   toastInfo('Log keluar berjaya');
 }
@@ -578,6 +601,7 @@ async function onBook(){
       Swal.fire('Berjaya', 'Tempahan telah direkodkan.', 'success');
       if(state.room) refreshCalendar(false);
       loadOverview(false);
+      loadMyBookings(false); // Segarkan senarai peribadi
       $('note').value = '';
     } else {
       Swal.fire('Gagal', res.data?.error || 'Ralat tidak diketahui', 'error');
@@ -1158,6 +1182,7 @@ async function cancelBooking(id){
     if(data && data.ok){
       toastOk('Berjaya dibatalkan');
       loadOverview(false);
+      loadMyBookings(false); // Segar semula senarai tempahan saya
       if(state.room) refreshCalendar(false);
     } else {
       Swal.fire('Gagal', data?.error || 'Ralat', 'error');
@@ -1165,9 +1190,12 @@ async function cancelBooking(id){
   }
 }
 
-// FUNGSI BARU: Edit tempahan dari tab Rumusan (untuk pengguna)
+// FUNGSI BARU: Edit tempahan dari tab Rumusan ATAU tab Tempahan Saya
 async function openUserEditModal(id){
-  const b = ov.bookings.find(x => x.booking_id === id);
+  // Cari tempahan sama ada dalam data Rumusan atau data Tempahan Saya
+  let b = ov.bookings.find(x => x.booking_id === id);
+  if (!b) b = state.myBookings.find(x => x.booking_id === id);
+  
   if(!b) return;
 
   const { value: form } = await Swal.fire({
@@ -1214,6 +1242,7 @@ async function openUserEditModal(id){
     if(data && data.ok){
       toastOk('Tempahan berjaya dikemaskini.');
       loadOverview(false);
+      loadMyBookings(false); // Segar semula senarai tempahan saya
       // Jika tab Tempahan menunjukkan bilik yang sama dengan yang diubahsuai, segarkan kalendarnya juga.
       if(state.room === b.bilik) refreshCalendar(false);
     } else {
@@ -1223,7 +1252,77 @@ async function openUserEditModal(id){
 }
 
 /* ==========================================================================
-   9. ADMIN PANEL LOGIC (USER & BOOKING MANAGEMENT)
+   9. MY BOOKINGS LOGIC (TEMPAHAN SAYA)
+   ========================================================================== */
+async function loadMyBookings(showLoading) {
+  if (!state.user) return;
+  if (showLoading) modalLoading('Memuatkan senarai tempahan anda...');
+  
+  const today = todayYMD();
+
+  // Memanggil terus rekod aktif dari sistem pangkalan data tanpa had bulan, 
+  // tetapi dihadkan kepada tarikh semasa/akan datang sahaja
+  const { data, error } = await supa
+    .from('v_bookings_active')
+    .select('*')
+    .eq('nama_penempah', state.user.nama)
+    .gte('tarikh', today) 
+    .order('tarikh', {ascending:true})
+    .order('masa_mula', {ascending:true});
+
+  if (showLoading) modalClose();
+
+  if(error) {
+    console.error(error);
+    toastErr('Gagal memuatkan tempahan peribadi.');
+    return;
+  }
+
+  state.myBookings = data || [];
+  renderMyBookingsTable();
+}
+
+function renderMyBookingsTable() {
+  const tbody = $('myBookingsTableBody');
+  if(!tbody) return;
+  tbody.innerHTML = '';
+
+  if(!state.myBookings || state.myBookings.length === 0){
+    tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;padding:15px">Tiada tempahan aktif atau akan datang.</td></tr>';
+    return;
+  }
+
+  state.myBookings.forEach(b => {
+    const tr = createEl('tr');
+    tr.innerHTML = `
+      <td>${b.tarikh}</td>
+      <td style="font-family:monospace">${toHHMM(b.masa_mula)}-${toHHMM(b.masa_tamat)}</td>
+      <td>${b.bilik}</td>
+      <td>${escapeHtml(b.tujuan)}</td>
+      <td style="text-align:center">
+        <div style="display:flex; gap:8px; justify-content:center;">
+          <button class="btn-icon-edit-my" data-id="${b.booking_id}" title="Kemaskini">✏️</button>
+          <button class="btn-icon-del-my" data-id="${b.booking_id}" title="Batal">🗑️</button>
+        </div>
+      </td>
+    `;
+    tbody.appendChild(tr);
+  });
+
+  // Hubungkan event listeners untuk butang Batal & Edit pada tab ini
+  document.querySelectorAll('.btn-icon-del-my').forEach(btn => {
+    btn.addEventListener('click', () => cancelBooking(btn.dataset.id));
+    btn.style.cssText = "background:none; border:none; cursor:pointer; font-size:1.1rem;";
+  });
+  
+  document.querySelectorAll('.btn-icon-edit-my').forEach(btn => {
+    btn.addEventListener('click', () => openUserEditModal(btn.dataset.id));
+    btn.style.cssText = "background:none; border:none; cursor:pointer; font-size:1.1rem;";
+  });
+}
+
+/* ==========================================================================
+   10. ADMIN PANEL LOGIC (USER & BOOKING MANAGEMENT)
    ========================================================================== */
 async function loadAdminUserList(){
   const tbody = $('adminUserListBody');
@@ -1387,6 +1486,7 @@ async function executeBulkCancel(){
     if(data && data.ok){
       toastOk(`${data.updated} tempahan dibatalkan.`);
       loadAdminBookingList(); 
+      loadMyBookings(false); // Kemaskini jika ada kaitan
     } else {
       Swal.fire('Ralat', data?.error, 'error');
     }
@@ -1440,6 +1540,7 @@ async function openEditModal(id){
     if(data && data.ok){
       toastOk('Tempahan dikemaskini.');
       loadAdminBookingList();
+      loadMyBookings(false); // Segar peribadi jika kaitan
       if(state.room) refreshCalendar(false);
     } else {
       Swal.fire('Ralat', data?.error, 'error');
