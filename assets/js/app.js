@@ -12,6 +12,7 @@ const ROOM_OPTIONS = [
   "PKG Masjid Tanah - Bilik Seri Cempaka (24 orang)",
   "PKG Masjid Tanah - Bilik Seri Melur (18 orang)",
   "PKG Masjid Tanah - Bilik Pendidikan Digital (12 orang)",
+  "Bilik Mesyuarat PPDAG di SK Alor Gajah 1 (40 orang)",
   "Bilik Mesyuarat Utama PPDAG (73 orang)",
   "Bilik Mesyuarat Kecil PPDAG (15 orang)",
   "Makmal Komputer PPDAG (31 testing)",
