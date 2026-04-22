@@ -15,7 +15,7 @@ const ROOM_OPTIONS = [
   "Bilik Mesyuarat PPDAG di SK Alor Gajah 1 (40 orang)",
   "Bilik Mesyuarat Utama PPDAG (73 orang)",
   "Bilik Mesyuarat Kecil PPDAG (15 orang)",
-  "Makmal Komputer PPDAG (31 testing)",
+  "Makmal Komputer PPDAG (31 orang)",
   "Bilik Seminar PPDAG (22 orang)",
   "Bilik Temuduga PPDAG (4 orang)",
   "Bilik Runding Cara PPDAG (4 orang)",
