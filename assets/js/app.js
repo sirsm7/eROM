@@ -89,7 +89,9 @@ async function modalConfirm(title, text, confirmText = 'Ya, Teruskan') {
 // State Permulaan untuk User (memudahkan reset)
 const DEFAULT_USER_STATE = {
   user: null,
-  isAdmin: false
+  isAdmin: false,
+  sessionToken: null,
+  sessionExpiresAt: null
 };
 
 let state = { 
@@ -348,14 +350,25 @@ function resetUserState() {
   // Pastikan isAdmin juga false
   state.isAdmin = false;
   state.user = null;
+  state.sessionToken = null;
+  state.sessionExpiresAt = null;
   state.myBookings = [];
+}
+
+function getSessionToken(){
+  return state.sessionToken || localStorage.getItem('erom_session_token') || '';
 }
 
 function restoreSession(){
   const saved = localStorage.getItem('erom_user');
-  if(saved){
+  const savedToken = localStorage.getItem('erom_session_token');
+  const savedExpiresAt = localStorage.getItem('erom_session_expires_at');
+
+  if(saved && savedToken){
     try {
       state.user = JSON.parse(saved);
+      state.sessionToken = savedToken;
+      state.sessionExpiresAt = savedExpiresAt;
       onLoginSuccess();
     } catch(e) { 
       console.error('Session corrupt', e); 
@@ -392,7 +405,14 @@ async function showLoginModal(){
     if(!data.ok) return Swal.fire('Gagal', data.error, 'error');
 
     state.user = data.user;
+    state.sessionToken = data.session_token || null;
+    state.sessionExpiresAt = data.session_expires_at || null;
+
+    if(!state.sessionToken) return Swal.fire('Ralat Sistem', 'Token sesi tidak diterima. Sila hubungi pentadbir.', 'error');
+
     localStorage.setItem('erom_user', JSON.stringify(state.user));
+    localStorage.setItem('erom_session_token', state.sessionToken);
+    if(state.sessionExpiresAt) localStorage.setItem('erom_session_expires_at', state.sessionExpiresAt);
     onLoginSuccess();
     toastOk(`Selamat datang, ${state.user.nama}`);
   }
@@ -439,10 +459,22 @@ function onLoginSuccess(){
   }
 }
 
-function onLogout(){
+async function onLogout(){
+  const currentSessionToken = getSessionToken();
+
+  if(currentSessionToken){
+    try {
+      await supa.rpc('fn_logout_secure', { p_session_token: currentSessionToken });
+    } catch(e) {
+      console.warn('Session revoke failed', e);
+    }
+  }
+
   // 1. DEEP RESET STATE
   resetUserState();
   localStorage.removeItem('erom_user');
+  localStorage.removeItem('erom_session_token');
+  localStorage.removeItem('erom_session_expires_at');
   
   // 2. UI RESET
   $('mainLoginBtn').style.display = 'block';
@@ -515,8 +547,11 @@ async function changeOwnPassword(){
   
   if(form){
     modalLoading('Mengemaskini...');
-    const { data } = await supa.rpc('fn_change_own_password', {
-      p_email: state.user.email, p_old_pass: form[0], p_new_pass: form[1]
+    const { data } = await supa.rpc('fn_change_own_password_v2', {
+      p_email: state.user.email,
+      p_old_pass: form[0],
+      p_new_pass: form[1],
+      p_session_token: getSessionToken()
     });
     modalClose();
     if(data && data.ok) Swal.fire('Berjaya', 'Kata laluan ditukar.', 'success');
@@ -572,7 +607,7 @@ async function onBook(){
   try {
     let res;
     if(state.rangeMode){
-      res = await supa.rpc('fn_create_booking_range_secure', {
+      res = await supa.rpc('fn_create_booking_range_secure_v2', {
         p_bilik: inputs.room,
         p_from: $('fromDate').value,
         p_to: $('toDate').value,
@@ -581,10 +616,11 @@ async function onBook(){
         p_category: inputs.category,
         p_note: inputs.note,
         p_sektor: inputs.sektor,
-        p_nama: inputs.nama
+        p_nama: inputs.nama,
+        p_session_token: getSessionToken()
       });
     } else {
-      res = await supa.rpc('fn_create_booking_secure', {
+      res = await supa.rpc('fn_create_booking_secure_v2', {
         p_bilik: inputs.room,
         p_date: inputs.date,
         p_start: inputs.start,
@@ -592,7 +628,8 @@ async function onBook(){
         p_category: inputs.category,
         p_note: inputs.note,
         p_sektor: inputs.sektor,
-        p_nama: inputs.nama
+        p_nama: inputs.nama,
+        p_session_token: getSessionToken()
       });
     }
 
@@ -1174,9 +1211,11 @@ async function cancelBooking(id){
 
   if(isConfirmed){
     modalLoading('Membatalkan...');
-    const { data } = await supa.rpc('fn_cancel_booking_secure', {
+    const { data } = await supa.rpc('fn_cancel_booking_secure_v2', {
       p_booking_id: id,
-      p_email: state.user.email
+      p_email: state.user.email,
+      p_reason: 'Dibatalkan oleh pengguna',
+      p_session_token: getSessionToken()
     });
     modalClose();
     
@@ -1227,7 +1266,7 @@ async function openUserEditModal(id){
 
     modalLoading('Menyimpan...');
     // Gunakan fungsi yang sama seperti admin, ia mengesahkan email pemilik secara automatik.
-    const { data } = await supa.rpc('fn_update_booking_secure', {
+    const { data } = await supa.rpc('fn_update_booking_secure_v2', {
       p_booking_id: id,
       p_email: state.user.email, 
       p_date: form.d,
@@ -1236,7 +1275,8 @@ async function openUserEditModal(id){
       p_category: b.kategori,
       p_note: form.n,
       p_sektor: b.sektor,
-      p_nama: b.nama_penempah
+      p_nama: b.nama_penempah,
+      p_session_token: getSessionToken()
     });
     modalClose();
     
@@ -1331,7 +1371,10 @@ async function loadAdminUserList(){
 
   tbody.innerHTML = '<tr><td colspan="4" style="text-align:center;padding:15px">Memuatkan...</td></tr>';
   
-  const { data, error } = await supa.rpc('fn_get_all_users_secure', { p_email: state.user.email });
+  const { data, error } = await supa.rpc('fn_get_all_users_secure_v2', {
+    p_email: state.user.email,
+    p_session_token: getSessionToken()
+  });
   
   if(error || !data || !data.ok){
     tbody.innerHTML = '<tr><td colspan="4" style="text-align:center;color:red">Gagal akses data pengguna.</td></tr>';
@@ -1376,9 +1419,10 @@ async function adminResetPassword(id, email){
   });
   if(isConfirmed){
     modalLoading('Memproses...');
-    const { data } = await supa.rpc('fn_admin_reset_password', {
+    const { data } = await supa.rpc('fn_admin_reset_password_v2', {
        p_admin_email: state.user.email,
-       p_target_id: id
+       p_target_id: id,
+       p_session_token: getSessionToken()
     });
     modalClose();
     if(data && data.ok) Swal.fire('Berjaya', 'Kata laluan telah ditetapkan semula.', 'success');
@@ -1393,9 +1437,10 @@ async function loadAdminBookingList(){
   const listDiv = $('adminList');
   listDiv.innerHTML = '<div style="padding:10px;text-align:center">Memuatkan...</div>';
   
-  const { data } = await supa.rpc('fn_admin_list_bookings', {
+  const { data } = await supa.rpc('fn_admin_list_bookings_v2', {
     p_email: state.user.email,
-    p_bilik: room
+    p_bilik: room,
+    p_session_token: getSessionToken()
   });
 
   if(!data || !data.ok){
@@ -1477,10 +1522,11 @@ async function executeBulkCancel(){
     if (!isConfirmed) return;
 
     modalLoading('Membatalkan...');
-    const { data } = await supa.rpc('fn_delete_booking_bulk_secure', {
+    const { data } = await supa.rpc('fn_delete_booking_bulk_secure_v2', {
       p_ids: ids,
       p_email: state.user.email,
-      p_reason: reason
+      p_reason: reason,
+      p_session_token: getSessionToken()
     });
     modalClose();
     
@@ -1525,7 +1571,7 @@ async function openEditModal(id){
     if (!isConfirmed) return;
 
     modalLoading('Menyimpan...');
-    const { data } = await supa.rpc('fn_update_booking_secure', {
+    const { data } = await supa.rpc('fn_update_booking_secure_v2', {
       p_booking_id: id,
       p_email: state.user.email, 
       p_date: form.d,
@@ -1534,7 +1580,8 @@ async function openEditModal(id){
       p_category: b.kategori,
       p_note: form.n,
       p_sektor: b.sektor,
-      p_nama: b.nama_penempah
+      p_nama: b.nama_penempah,
+      p_session_token: getSessionToken()
     });
     modalClose();
     
