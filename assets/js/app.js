@@ -14,7 +14,9 @@ const ROOM_OPTIONS = [
   "PKG Masjid Tanah - Bilik Pendidikan Digital (12 orang)",
   "Bilik Mesyuarat PPDAG di SK Alor Gajah 1 (40 orang)",
   "Bilik Mesyuarat Utama PPDAG (73 orang)",
-  "Bilik Mesyuarat Kecil PPDAG (15 orang)",
+// [COMMENT SYNTAX] SURGICAL EDIT START: Kemaskini nama bilik daripada Mesyuarat Kecil kepada Bilik Perbincangan
+  "Bilik Perbincangan PPDAG (15 orang)",
+// [COMMENT SYNTAX] SURGICAL EDIT END
   "Makmal Komputer PPDAG (31 orang)",
   "Bilik Seminar PPDAG (22 orang)",
   "Bilik Temuduga PPDAG (4 orang)",
@@ -38,7 +40,7 @@ const todayYMD = ()=> toYMD(new Date());
 function toHHMM(x){
   if (x == null) return "";
   const s = String(x).trim();
-  if (/^\d{2}:\d{2}/.test(s)) return s.slice(0,5);              
+  if (/^\d{2}:\d{2}/.test(s)) return s.slice(0,5);            
   const d = new Date(s);
   if (!isNaN(d)) return `${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
   return s;
