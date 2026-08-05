@@ -24,6 +24,24 @@
   <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
 
   <link rel="stylesheet" href="./assets/css/style.css">
+  
+  <style>
+    /* Print Styles */
+    @media print {
+      body * { visibility: hidden; }
+      #tabAdminSearch, #tabAdminSearch * { visibility: visible; }
+      #tabAdminSearch { position: absolute; left: 0; top: 0; width: 100%; }
+      .toolbar, .btn, .tabs, h1, .auth-controls { display: none !important; }
+      #adminSearchFilterForm { display: none !important; }
+      .card { border: none; box-shadow: none; margin: 0; padding: 0; }
+      table { border-collapse: collapse; width: 100%; }
+      th, td { border: 1px solid #000; padding: 8px; font-size: 12px; }
+      th { background-color: #f2f2f2 !important; -webkit-print-color-adjust: exact; }
+      /* Hide the 'Tindakan' column in print */
+      th:last-child, td:last-child { display: none; }
+      #adminSearchStats { border: 1px solid #000; margin-bottom: 20px; padding: 10px; }
+    }
+  </style>
 </head>
 <body>
   <div class="wrap">
@@ -331,17 +349,19 @@
       </div>
     </section>
 
-    <!-- TAB BARU: CARIAN TEMPAHAN (ADMIN KHUSUS) -->
     <section id="tabAdminSearch" class="tabpane">
-      <div class="card toolbar">
-        <div>
-          <div class="small" style="font-weight:600; font-size:1rem; color:var(--primary);">Carian Keseluruhan Tempahan (Admin)</div>
-          <div style="margin-top:4px;" class="small">Tapis tempahan berdasarkan julat tarikh dan bilik.</div>
+      <div class="card toolbar" id="adminSearchFilterForm">
+        <div style="display:flex; justify-content:space-between; align-items:center; width: 100%;">
+          <div>
+            <div class="small" style="font-weight:600; font-size:1rem; color:var(--primary);">Carian Keseluruhan Tempahan (Admin)</div>
+            <div style="margin-top:4px;" class="small">Tapis tempahan berdasarkan julat tarikh, bilik dan penempah.</div>
+          </div>
+          <button class="btn secondary" id="btnAdminPrintSearch" style="display:none;">Cetak Laporan</button>
         </div>
       </div>
 
       <div class="card">
-        <div class="row" style="margin-bottom:16px; align-items:end; gap:12px;">
+        <div class="row" id="adminSearchFilterForm" style="margin-bottom:16px; align-items:end; gap:12px;">
           <div>
             <label class="small">Tarikh Mula</label><br>
             <input type="date" id="adminSearchStartDate" required>
@@ -356,8 +376,22 @@
               <option value="">Semua Bilik</option>
             </select>
           </div>
+          <div style="flex:1;">
+            <label class="small">Tapis Penempah (Selepas Carian)</label><br>
+            <select id="adminSearchUserFilter" style="width:100%;" disabled>
+              <option value="">— Semua Penempah —</option>
+            </select>
+          </div>
           <div>
             <button class="btn" id="btnAdminExecuteSearch">Cari Tempahan</button>
+          </div>
+        </div>
+
+        <div id="adminSearchStats" style="display:none; background:#f8fafc; border:1px solid #e2e8f0; border-radius:10px; padding:15px; margin-bottom:16px;">
+          <div class="row" style="gap:20px;">
+            <div><span class="small">Jumlah Tempahan:</span> <strong id="statTotalBookings">0</strong></div>
+            <div><span class="small">Jumlah Pegawai (Unik):</span> <strong id="statUniqueUsers">0</strong></div>
+            <div><span class="small">Sektor Terbanyak:</span> <strong id="statTopSektor">-</strong></div>
           </div>
         </div>
 
@@ -365,16 +399,17 @@
           <table>
             <thead>
               <tr>
-                <th style="width:120px">Tarikh</th>
-                <th style="width:110px">Masa</th>
+                <th style="width:110px">Tarikh</th>
+                <th style="width:100px">Masa</th>
                 <th>Bilik</th>
                 <th>Tujuan</th>
-                <th style="width:200px">Penempah</th>
+                <th>Sektor</th> <!-- Added Sektor column -->
+                <th style="width:180px">Penempah</th>
                 <th style="width:80px; text-align:center;">Tindakan</th>
               </tr>
             </thead>
             <tbody id="adminSearchTableBody">
-              <tr><td colspan="6" style="text-align:center; padding:15px">Sila masukkan tarikh mula dan akhir, kemudian klik Cari Tempahan.</td></tr>
+              <tr><td colspan="7" style="text-align:center; padding:15px">Sila masukkan tarikh mula dan akhir, kemudian klik Cari Tempahan.</td></tr>
             </tbody>
           </table>
         </div>

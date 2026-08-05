@@ -116,7 +116,8 @@ let ov = {
 };
 
 let adminState = {
-  bookings: [] 
+  bookings: [],
+  searchData: [] // Tambah simpan data carian
 };
 
 /* ==========================================================================
@@ -130,11 +131,11 @@ async function bootstrap(){
 
   const roomSel = $('roomSelect');
   const adminRoomSel = $('adminRoom');
-  const adminSearchRoomSel = $('adminSearchRoom'); // BARU
+  const adminSearchRoomSel = $('adminSearchRoom');
   ROOM_OPTIONS.forEach(r => {
     roomSel.appendChild(new Option(r, r));
     if(adminRoomSel) adminRoomSel.appendChild(new Option(r, r));
-    if(adminSearchRoomSel) adminSearchRoomSel.appendChild(new Option(r, r)); // BARU
+    if(adminSearchRoomSel) adminSearchRoomSel.appendChild(new Option(r, r));
   });
 
   const catSel = $('category');
@@ -156,7 +157,7 @@ function setupUI(){
   $('tabKalendarBtn').addEventListener('click', ()=> switchTab('kalendar'));
   $('tabTempahanSayaBtn').addEventListener('click', ()=> switchTab('tempahanSaya'));
   $('tabAdminBtn').addEventListener('click', ()=> switchTab('admin'));
-  if($('tabAdminSearchBtn')) $('tabAdminSearchBtn').addEventListener('click', ()=> switchTab('adminSearch')); // BARU
+  if($('tabAdminSearchBtn')) $('tabAdminSearchBtn').addEventListener('click', ()=> switchTab('adminSearch'));
 
   $('roomSelect').addEventListener('change', onRoomSelectChange);
   
@@ -210,7 +211,19 @@ function setupUI(){
   if($('adminRefreshUsers')) $('adminRefreshUsers').addEventListener('click', loadAdminUserList);
   if($('btnAdminLoad')) $('btnAdminLoad').addEventListener('click', loadAdminBookingList);
   if($('btnBulkCancel')) $('btnBulkCancel').addEventListener('click', executeBulkCancel);
-  if($('btnAdminExecuteSearch')) $('btnAdminExecuteSearch').addEventListener('click', executeAdminSearch); // BARU
+  if($('btnAdminExecuteSearch')) $('btnAdminExecuteSearch').addEventListener('click', executeAdminSearch);
+  
+  // Print Button Listener
+  if($('btnAdminPrintSearch')) {
+      $('btnAdminPrintSearch').addEventListener('click', () => {
+          window.print();
+      });
+  }
+  
+  // Search User Filter Change
+  if($('adminSearchUserFilter')) {
+      $('adminSearchUserFilter').addEventListener('change', renderAdminSearchTable);
+  }
 }
 
 function resetUI(){
@@ -237,7 +250,7 @@ function resetUI(){
   } else {
      $('adminLoginBox').style.display='block'; 
      $('adminPanel').style.display='none';
-     if($('tabAdminSearchBtn')) $('tabAdminSearchBtn').style.display = 'none'; // BARU
+     if($('tabAdminSearchBtn')) $('tabAdminSearchBtn').style.display = 'none';
   }
   
   switchTab('tempahan'); 
@@ -304,7 +317,7 @@ function switchTab(name){
   document.querySelectorAll('.tabbtn').forEach(b => b.classList.toggle('active', b.id === `tab${name.charAt(0).toUpperCase() + name.slice(1)}Btn`));
   document.querySelectorAll('.tabpane').forEach(p => p.classList.toggle('active', p.id === `tab${name.charAt(0).toUpperCase() + name.slice(1)}`));
 
-  if(name === 'admin' || name === 'adminSearch'){ // KEMASKINI
+  if(name === 'admin' || name === 'adminSearch'){
     if(state.user && state.user.role === 'ADMIN'){
       if(name === 'admin'){
         $('adminLoginBox').style.display = 'none';
@@ -421,7 +434,7 @@ function onLoginSuccess(){
   
   if(state.isAdmin) {
     $('tabAdminBtn').style.display = 'inline-block';
-    if($('tabAdminSearchBtn')) $('tabAdminSearchBtn').style.display = 'inline-block'; // BARU
+    if($('tabAdminSearchBtn')) $('tabAdminSearchBtn').style.display = 'inline-block';
     if($('tabAdmin').classList.contains('active')){
       $('adminLoginBox').style.display = 'none';
       $('adminPanel').style.display = 'block';
@@ -459,7 +472,7 @@ async function onLogout(){
   $('userProfileBadge').classList.remove('active');
   
   $('tabAdminBtn').style.display = 'none';
-  if($('tabAdminSearchBtn')) $('tabAdminSearchBtn').style.display = 'none'; // BARU
+  if($('tabAdminSearchBtn')) $('tabAdminSearchBtn').style.display = 'none';
   $('adminLoginBox').style.display = 'block';
   $('adminPanel').style.display = 'none';
   
@@ -473,7 +486,7 @@ async function onLogout(){
   
   toggleBookingForm(false);
   
-  if($('tabAdmin').classList.contains('active') || $('tabTempahanSaya').classList.contains('active') || $('tabAdminSearch').classList.contains('active')) { // KEMASKINI
+  if($('tabAdmin').classList.contains('active') || $('tabTempahanSaya').classList.contains('active') || $('tabAdminSearch').classList.contains('active')) {
       switchTab('tempahan');
   }
 
@@ -1163,6 +1176,7 @@ async function cancelBooking(id){
       loadOverview(false);
       loadMyBookings(false); 
       if(state.room) refreshCalendar(false);
+      if($('tabAdminSearch').classList.contains('active')) executeAdminSearch();
     } else {
       Swal.fire('Gagal', data?.error || 'Ralat', 'error');
     }
@@ -1492,7 +1506,6 @@ async function openEditModal(id){
   });
 
   if(form){
-    // [SAFETY GUARD] Pengesahan Edit
     const isConfirmed = await modalConfirm(
       'Simpan Perubahan?',
       'Maklumat tempahan asal akan digantikan dengan data baharu.'
@@ -1517,9 +1530,8 @@ async function openEditModal(id){
     if(data && data.ok){
       toastOk('Tempahan dikemaskini.');
       loadAdminBookingList();
-      loadMyBookings(false); // Segar peribadi jika kaitan
+      loadMyBookings(false); 
       if(state.room) refreshCalendar(false);
-      // PENTING: Refresh Admin Search if active
       if($('tabAdminSearch').classList.contains('active')) executeAdminSearch();
     } else {
       Swal.fire('Ralat', data?.error, 'error');
@@ -1527,7 +1539,9 @@ async function openEditModal(id){
   }
 }
 
-// FUNGSI BARU: Logik Carian Tempahan (Admin)
+/* ==========================================================================
+   11. CARIAN TEMPAHAN (ADMIN KHUSUS)
+   ========================================================================== */
 async function executeAdminSearch() {
   const startDate = $('adminSearchStartDate').value;
   const endDate = $('adminSearchEndDate').value;
@@ -1541,7 +1555,10 @@ async function executeAdminSearch() {
     return toastWarn('Tarikh mula mesti sebelum atau sama dengan tarikh akhir');
   }
 
-  tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;padding:15px">Memuatkan...</td></tr>';
+  tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:15px">Memuatkan...</td></tr>';
+  $('adminSearchStats').style.display = 'none';
+  $('btnAdminPrintSearch').style.display = 'none';
+  
   modalLoading('Mencari rekod...');
 
   let query = supa
@@ -1561,49 +1578,112 @@ async function executeAdminSearch() {
 
   if (error) {
     console.error(error);
-    tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:red">Ralat memuatkan carian.</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:red">Ralat memuatkan carian.</td></tr>';
     return toastErr('Gagal membuat carian');
   }
 
-  if (!data || data.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;padding:15px">Tiada tempahan ditemui untuk kriteria ini.</td></tr>';
-    return;
-  }
+  adminState.searchData = data || []; // Simpan data untuk ditapis
+  
+  populateAdminSearchUserFilter();
+  renderAdminSearchTable();
+}
 
-  tbody.innerHTML = '';
-  data.forEach(b => {
-    const tr = createEl('tr');
+function populateAdminSearchUserFilter() {
+    const filterEl = $('adminSearchUserFilter');
+    if(!filterEl) return;
     
-    const actionHtml = `
-      <div style="display:flex; gap:8px; justify-content:center;">
-        <button class="btn-icon-edit-search" data-id="${b.booking_id}" title="Kemaskini Tempahan">✏️</button>
-        <button class="btn-icon-del-search" data-id="${b.booking_id}" title="Batal Tempahan">🗑️</button>
-      </div>
-    `;
-
-    tr.innerHTML = `
-      <td>${b.tarikh}</td>
-      <td style="font-family:monospace">${toHHMM(b.masa_mula)}-${toHHMM(b.masa_tamat)}</td>
-      <td>${b.bilik}</td>
-      <td>${escapeHtml(b.tujuan)}</td>
-      <td><strong>${escapeHtml(b.nama_penempah)}</strong></td>
-      <td style="text-align:center">${actionHtml}</td>
-    `;
-    tbody.appendChild(tr);
-  });
-
-  document.querySelectorAll('.btn-icon-del-search').forEach(btn => {
-    btn.addEventListener('click', async () => {
-       await cancelBooking(btn.dataset.id);
-       executeAdminSearch(); // Refresh carian lepas delete
+    filterEl.innerHTML = '<option value="">— Semua Penempah —</option>';
+    
+    if(!adminState.searchData || adminState.searchData.length === 0) {
+        filterEl.disabled = true;
+        return;
+    }
+    
+    const uniqueNames = [...new Set(adminState.searchData.map(b => b.nama_penempah))].sort();
+    
+    uniqueNames.forEach(name => {
+        filterEl.appendChild(new Option(name, name));
     });
-    btn.style.cssText = "background:none; border:none; cursor:pointer; font-size:1.1rem;";
-  });
+    
+    filterEl.disabled = false;
+    filterEl.value = ''; // Reset selection
+}
 
-  document.querySelectorAll('.btn-icon-edit-search').forEach(btn => {
-    btn.addEventListener('click', () => openAdminSearchEditModal(btn.dataset.id, data));
-    btn.style.cssText = "background:none; border:none; cursor:pointer; font-size:1.1rem;";
-  });
+function renderAdminSearchTable() {
+    const tbody = $('adminSearchTableBody');
+    let data = adminState.searchData;
+    const filterUser = $('adminSearchUserFilter').value;
+    
+    if (filterUser) {
+        data = data.filter(b => b.nama_penempah === filterUser);
+    }
+    
+    if (!data || data.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:15px">Tiada tempahan ditemui untuk kriteria ini.</td></tr>';
+      $('adminSearchStats').style.display = 'none';
+      $('btnAdminPrintSearch').style.display = 'none';
+      return;
+    }
+
+    // Kira Statistik
+    const totalBookings = data.length;
+    const uniqueUsers = new Set(data.map(b => b.nama_penempah)).size;
+    
+    const sektorCounts = {};
+    data.forEach(b => {
+        const sek = b.sektor || 'Tiada Sektor';
+        sektorCounts[sek] = (sektorCounts[sek] || 0) + 1;
+    });
+    
+    let topSektor = '-';
+    let maxSektorCount = 0;
+    for (const sek in sektorCounts) {
+        if (sektorCounts[sek] > maxSektorCount) {
+            maxSektorCount = sektorCounts[sek];
+            topSektor = `${sek} (${maxSektorCount})`;
+        }
+    }
+
+    $('statTotalBookings').textContent = totalBookings;
+    $('statUniqueUsers').textContent = uniqueUsers;
+    $('statTopSektor').textContent = topSektor;
+    $('adminSearchStats').style.display = 'block';
+    $('btnAdminPrintSearch').style.display = 'inline-block';
+
+    tbody.innerHTML = '';
+    data.forEach(b => {
+      const tr = createEl('tr');
+      
+      const actionHtml = `
+        <div style="display:flex; gap:8px; justify-content:center;">
+          <button class="btn-icon-edit-search" data-id="${b.booking_id}" title="Kemaskini Tempahan">✏️</button>
+          <button class="btn-icon-del-search" data-id="${b.booking_id}" title="Batal Tempahan">🗑️</button>
+        </div>
+      `;
+
+      tr.innerHTML = `
+        <td>${b.tarikh}</td>
+        <td style="font-family:monospace">${toHHMM(b.masa_mula)}-${toHHMM(b.masa_tamat)}</td>
+        <td>${b.bilik}</td>
+        <td>${escapeHtml(b.tujuan)}</td>
+        <td>${escapeHtml(b.sektor || '-')}</td> 
+        <td><strong>${escapeHtml(b.nama_penempah)}</strong></td>
+        <td style="text-align:center">${actionHtml}</td>
+      `;
+      tbody.appendChild(tr);
+    });
+
+    document.querySelectorAll('.btn-icon-del-search').forEach(btn => {
+      btn.addEventListener('click', async () => {
+         await cancelBooking(btn.dataset.id);
+      });
+      btn.style.cssText = "background:none; border:none; cursor:pointer; font-size:1.1rem;";
+    });
+
+    document.querySelectorAll('.btn-icon-edit-search').forEach(btn => {
+      btn.addEventListener('click', () => openAdminSearchEditModal(btn.dataset.id, adminState.searchData));
+      btn.style.cssText = "background:none; border:none; cursor:pointer; font-size:1.1rem;";
+    });
 }
 
 async function openAdminSearchEditModal(id, searchData){
@@ -1635,7 +1715,7 @@ async function openAdminSearchEditModal(id, searchData){
     modalLoading('Menyimpan...');
     const { data } = await supa.rpc('fn_update_booking_secure_v2', {
       p_booking_id: id,
-      p_email: state.user.email, // Admin email
+      p_email: state.user.email, 
       p_date: form.d,
       p_start: form.s,
       p_end: form.e,
@@ -1649,11 +1729,14 @@ async function openAdminSearchEditModal(id, searchData){
     
     if(data && data.ok){
       toastOk('Tempahan berjaya dikemaskini.');
-      executeAdminSearch(); // Refresh list search
-      loadOverview(false); // Refresh background
+      executeAdminSearch(); 
+      loadOverview(false); 
       if(state.room === b.bilik) refreshCalendar(false);
     } else {
       Swal.fire('Ralat', data?.error || 'Ralat tidak diketahui', 'error');
     }
   }
 }
+```
+`Status: Tiada lagi fail.`
+`✅ Pengekodan selesai.`
