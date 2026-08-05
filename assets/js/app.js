@@ -14,9 +14,7 @@ const ROOM_OPTIONS = [
   "PKG Masjid Tanah - Bilik Pendidikan Digital (12 orang)",
   "Bilik Mesyuarat PPDAG di SK Alor Gajah 1 (40 orang)",
   "Bilik Mesyuarat Utama PPDAG (73 orang)",
-// [COMMENT SYNTAX] SURGICAL EDIT START: Kemaskini nama bilik daripada Mesyuarat Kecil kepada Bilik Perbincangan
   "Bilik Perbincangan PPDAG (15 orang)",
-// [COMMENT SYNTAX] SURGICAL EDIT END
   "Makmal Komputer PPDAG (31 orang)",
   "Bilik Seminar PPDAG (22 orang)",
   "Bilik Temuduga PPDAG (4 orang)",
@@ -88,7 +86,6 @@ async function modalConfirm(title, text, confirmText = 'Ya, Teruskan') {
 /* ==========================================================================
    3. STATE MANAGEMENT
    ========================================================================== */
-// State Permulaan untuk User (memudahkan reset)
 const DEFAULT_USER_STATE = {
   user: null,
   isAdmin: false,
@@ -97,7 +94,7 @@ const DEFAULT_USER_STATE = {
 };
 
 let state = { 
-  ...DEFAULT_USER_STATE, // Spread default properties
+  ...DEFAULT_USER_STATE,
   year: new Date().getFullYear(),
   month: new Date().getMonth()+1,
   room: '',
@@ -105,17 +102,17 @@ let state = {
   selectedDate: null,
   range:{from:null,to:null}, 
   rangeMode:false,
-  myBookings: [] // State untuk menyimpan tempahan peribadi
+  myBookings: []
 };
 
 let ov = { 
   year: new Date().getFullYear(),
   month: new Date().getMonth()+1,
-  days:[], // Untuk calendar view (stats bilik)
-  bookings:[], // Untuk table view (senarai penuh)
+  days:[],
+  bookings:[],
   view:'calendar', 
   filterRoom:'',
-  filterUser:'' // State baru untuk tapisan pengguna
+  filterUser:''
 };
 
 let adminState = {
@@ -133,9 +130,11 @@ async function bootstrap(){
 
   const roomSel = $('roomSelect');
   const adminRoomSel = $('adminRoom');
+  const adminSearchRoomSel = $('adminSearchRoom'); // BARU
   ROOM_OPTIONS.forEach(r => {
     roomSel.appendChild(new Option(r, r));
     if(adminRoomSel) adminRoomSel.appendChild(new Option(r, r));
+    if(adminSearchRoomSel) adminSearchRoomSel.appendChild(new Option(r, r)); // BARU
   });
 
   const catSel = $('category');
@@ -144,32 +143,28 @@ async function bootstrap(){
   const ovRoomFilter = $('ovRoomFilter');
   ROOM_OPTIONS.forEach(r => ovRoomFilter.appendChild(new Option(r,r)));
 
-  toggleCalendarHint(); // Init hint
+  toggleCalendarHint(); 
 
   await loadOverview(true);
 }
 
 function setupUI(){
-  // Auth Controls
   $('mainLoginBtn').addEventListener('click', showLoginModal);
   $('userProfileBadge').addEventListener('click', showUserProfile);
 
-  // Tabs
   $('tabTempahanBtn').addEventListener('click', ()=> switchTab('tempahan'));
   $('tabKalendarBtn').addEventListener('click', ()=> switchTab('kalendar'));
   $('tabTempahanSayaBtn').addEventListener('click', ()=> switchTab('tempahanSaya'));
   $('tabAdminBtn').addEventListener('click', ()=> switchTab('admin'));
+  if($('tabAdminSearchBtn')) $('tabAdminSearchBtn').addEventListener('click', ()=> switchTab('adminSearch')); // BARU
 
-  // Tempahan Toolbar
   $('roomSelect').addEventListener('change', onRoomSelectChange);
   
-  // LOGIK RESET UI (Segar Semula) - Reset Sepenuhnya
   $('btnRefresh').addEventListener('click', ()=>{ 
     resetUI(); 
     toastInfo('Antara muka ditetapkan semula'); 
   });
   
-  // Month Nav
   $('btnPrev').addEventListener('click', () => changeMonth(state, -1, true));
   $('btnNext').addEventListener('click', () => changeMonth(state, 1, true));
   $('ovPrev').addEventListener('click', () => changeMonth(ov, -1, false));
@@ -178,29 +173,23 @@ function setupUI(){
   $('monthLabel').textContent = formatMonthLabel(state.year, state.month);
   $('ovMonthLabel').textContent = formatMonthLabel(ov.year, ov.month);
 
-  // Range & Date
   $('toggleRangeOff').addEventListener('click', ()=>setRangeMode(false));
   $('toggleRangeOn').addEventListener('click', ()=>setRangeMode(true));
   $('pickedDate').addEventListener('change', onDateChange);
   
-  // Input tarikh manual (trigger logic range)
   $('fromDate').addEventListener('change', onRangeChange);
   $('toDate').addEventListener('change', onRangeChange);
   
-  // Klik Grid (Logik Utama)
   $('grid').addEventListener('click', onGridClick);
 
-  // Submit
   $('btnBook').addEventListener('click', onBook);
 
-  // Overview
   $('btnViewCalendar').addEventListener('click', ()=>switchOverviewView('calendar'));
   $('btnViewTable').addEventListener('click', ()=>switchOverviewView('table'));
   
-  // Filter Bilik Overview & Penjanaan Filter Nama Automatik
   $('ovRoomFilter').addEventListener('change', ()=>{ 
     ov.filterRoom = $('ovRoomFilter').value; 
-    ov.filterUser = ''; // Reset user filter
+    ov.filterUser = '';
     const userFilterEl = $('ovUserFilter');
     if(userFilterEl) userFilterEl.value = '';
     
@@ -208,7 +197,6 @@ function setupUI(){
     renderOvTable(); 
   });
 
-  // Filter User Overview
   const userFilterEl = $('ovUserFilter');
   if(userFilterEl) {
     userFilterEl.addEventListener('change', () => {
@@ -217,16 +205,14 @@ function setupUI(){
     });
   }
 
-  // My Bookings
   if($('btnRefreshMyBookings')) $('btnRefreshMyBookings').addEventListener('click', () => loadMyBookings(true));
 
-  // Admin
   if($('adminRefreshUsers')) $('adminRefreshUsers').addEventListener('click', loadAdminUserList);
   if($('btnAdminLoad')) $('btnAdminLoad').addEventListener('click', loadAdminBookingList);
   if($('btnBulkCancel')) $('btnBulkCancel').addEventListener('click', executeBulkCancel);
+  if($('btnAdminExecuteSearch')) $('btnAdminExecuteSearch').addEventListener('click', executeAdminSearch); // BARU
 }
 
-// FUNGSI RESET PENUH
 function resetUI(){
   const now = new Date(); 
   state.year = now.getFullYear(); 
@@ -241,24 +227,22 @@ function resetUI(){
   state.room = ''; 
   toggleCalendarHint();
   
-  resetBookingForm(true); // Ini akan reset mode range dan input
+  resetBookingForm(true);
   
   $('adminRoom').value = ''; 
   $('adminList').innerHTML = ''; 
   adminState.bookings = [];
   
-  // Paparan Admin
   if(state.user && state.user.role === 'ADMIN') {
-     // Admin stay logged in
   } else {
      $('adminLoginBox').style.display='block'; 
      $('adminPanel').style.display='none';
+     if($('tabAdminSearchBtn')) $('tabAdminSearchBtn').style.display = 'none'; // BARU
   }
   
   switchTab('tempahan'); 
   window.scrollTo({top:0, behavior:'smooth'});
   
-  // Reset Overview ke bulan semasa
   ov.year = now.getFullYear();
   ov.month = now.getMonth()+1;
   ov.filterRoom = '';
@@ -271,7 +255,7 @@ function resetUI(){
 }
 
 function resetBookingForm(clearFields){
-  setRangeMode(false); // Reset ke Single Day mode
+  setRangeMode(false);
   $('pickedDate').required = true; 
   $('fromDate').required = false; 
   $('toDate').required = false;
@@ -286,7 +270,6 @@ function resetBookingForm(clearFields){
     nama.appendChild(new Option('— Sila pilih sektor dahulu —', ''));
     nama.disabled = true;
     
-    // Auto-fill jika user ada
     if(state.user) {
       const sekSel = $('sektor');
       sekSel.innerHTML = '';
@@ -300,7 +283,7 @@ function resetBookingForm(clearFields){
   }
   state.selectedDate = null; 
   state.range = {from:null, to:null};
-  highlightRangeTiles(); // Clear highlights
+  highlightRangeTiles();
 }
 
 function changeMonth(obj, delta, refreshCal){
@@ -321,12 +304,14 @@ function switchTab(name){
   document.querySelectorAll('.tabbtn').forEach(b => b.classList.toggle('active', b.id === `tab${name.charAt(0).toUpperCase() + name.slice(1)}Btn`));
   document.querySelectorAll('.tabpane').forEach(p => p.classList.toggle('active', p.id === `tab${name.charAt(0).toUpperCase() + name.slice(1)}`));
 
-  if(name === 'admin'){
+  if(name === 'admin' || name === 'adminSearch'){ // KEMASKINI
     if(state.user && state.user.role === 'ADMIN'){
-      $('adminLoginBox').style.display = 'none';
-      $('adminPanel').style.display = 'block';
-      const userBody = $('adminUserListBody');
-      if(userBody && userBody.children.length <= 1) loadAdminUserList();
+      if(name === 'admin'){
+        $('adminLoginBox').style.display = 'none';
+        $('adminPanel').style.display = 'block';
+        const userBody = $('adminUserListBody');
+        if(userBody && userBody.children.length <= 1) loadAdminUserList();
+      }
     } else {
       $('adminLoginBox').style.display = 'block';
       $('adminPanel').style.display = 'none';
@@ -346,10 +331,7 @@ function toggleCalendarHint(){
    5. AUTHENTICATION & SESSION MANAGEMENT
    ========================================================================== */
 function resetUserState() {
-  // PENTING: Fungsi ini memastikan state user bersih sepenuhnya
-  // Menggunakan Object.assign untuk reset tanpa memutuskan rujukan objek state
   Object.assign(state, DEFAULT_USER_STATE);
-  // Pastikan isAdmin juga false
   state.isAdmin = false;
   state.user = null;
   state.sessionToken = null;
@@ -377,7 +359,6 @@ function restoreSession(){
       onLogout(); 
     }
   } else {
-    // Pastikan UI bersih jika tiada sesi
     onLogout();
   }
 }
@@ -431,17 +412,16 @@ function onLoginSuccess(){
 
   state.isAdmin = (state.user.role === 'ADMIN');
   
-  // Tunjuk butang Tempahan Saya
   const btnMyBookings = $('tabTempahanSayaBtn');
   if(btnMyBookings) btnMyBookings.style.display = 'inline-block';
   
-  // Tunjuk penapis penempah jika ada user auth
   const ovUserWrap = $('ovUserFilterWrap');
   if(ovUserWrap) ovUserWrap.style.display = 'block';
   populateUserFilter();
   
   if(state.isAdmin) {
     $('tabAdminBtn').style.display = 'inline-block';
+    if($('tabAdminSearchBtn')) $('tabAdminSearchBtn').style.display = 'inline-block'; // BARU
     if($('tabAdmin').classList.contains('active')){
       $('adminLoginBox').style.display = 'none';
       $('adminPanel').style.display = 'block';
@@ -451,10 +431,8 @@ function onLoginSuccess(){
   
   toggleBookingForm(true);
   
-  // Muat data tempahan saya (background)
   loadMyBookings(false);
   
-  // PENTING: Paksa render semula jadual untuk kemaskini butang "Delete / Edit"
   if(ov.view === 'table') {
     $('ovTableBody').innerHTML = ''; 
     renderOvTable();
@@ -472,25 +450,22 @@ async function onLogout(){
     }
   }
 
-  // 1. DEEP RESET STATE
   resetUserState();
   localStorage.removeItem('erom_user');
   localStorage.removeItem('erom_session_token');
   localStorage.removeItem('erom_session_expires_at');
   
-  // 2. UI RESET
   $('mainLoginBtn').style.display = 'block';
   $('userProfileBadge').classList.remove('active');
   
   $('tabAdminBtn').style.display = 'none';
+  if($('tabAdminSearchBtn')) $('tabAdminSearchBtn').style.display = 'none'; // BARU
   $('adminLoginBox').style.display = 'block';
   $('adminPanel').style.display = 'none';
   
-  // Sembunyikan butang Tempahan Saya
   const btnMyBookings = $('tabTempahanSayaBtn');
   if(btnMyBookings) btnMyBookings.style.display = 'none';
   
-  // Sembunyikan penapis penempah
   const ovUserWrap = $('ovUserFilterWrap');
   if(ovUserWrap) ovUserWrap.style.display = 'none';
   ov.filterUser = '';
@@ -498,15 +473,13 @@ async function onLogout(){
   
   toggleBookingForm(false);
   
-  // Kembalikan pengguna ke tab Tempahan jika mereka di tab eksklusif auth
-  if($('tabAdmin').classList.contains('active') || $('tabTempahanSaya').classList.contains('active')) {
+  if($('tabAdmin').classList.contains('active') || $('tabTempahanSaya').classList.contains('active') || $('tabAdminSearch').classList.contains('active')) { // KEMASKINI
       switchTab('tempahan');
   }
 
-  // 3. FORCE CLEAR TABLES
   if(ov.view === 'table') {
     $('ovTableBody').innerHTML = ''; 
-    renderOvTable(); // Render semula sebagai guest
+    renderOvTable(); 
   }
   
   const myBookingsTbody = $('myBookingsTableBody');
@@ -570,7 +543,7 @@ function toggleBookingForm(enable){
   $('btnBook').style.display = enable ? 'inline-block' : 'none';
 
   if(enable){
-    resetBookingForm(true); // Populate user data but keep date if set
+    resetBookingForm(true); 
   }
 }
 
@@ -597,7 +570,6 @@ async function onBook(){
   if(!inputs.start || !inputs.end) return toastWarn('Sila tetapkan masa');
   if(!inputs.note) { markInvalid($('note')); return toastWarn('Sila isi tujuan'); }
 
-  // [SAFETY GUARD] Pengesahan sebelum hantar
   const confirmMsg = state.rangeMode 
     ? 'Anda pasti mahu merekod tempahan berturut (julat tarikh)?' 
     : `Sahkan tempahan pada ${inputs.date}?`;
@@ -641,7 +613,7 @@ async function onBook(){
       Swal.fire('Berjaya', 'Tempahan telah direkodkan.', 'success');
       if(state.room) refreshCalendar(false);
       loadOverview(false);
-      loadMyBookings(false); // Segarkan senarai peribadi
+      loadMyBookings(false); 
       $('note').value = '';
     } else {
       Swal.fire('Gagal', res.data?.error || 'Ralat tidak diketahui', 'error');
@@ -658,14 +630,13 @@ async function onBook(){
    ========================================================================== */
 function onRoomSelectChange(e){
   state.room = e.target.value;
-  // Partial reset, don't clear everything
   $('pickedDate').value = '';
   $('fromDate').value = '';
   $('toDate').value = '';
   state.selectedDate = null;
   state.range = {from:null, to:null};
   document.querySelectorAll('.tile.sel').forEach(el=>el.classList.remove('sel'));
-  highlightRangeTiles(); // Clear range highlights
+  highlightRangeTiles(); 
   
   if(state.room){
     $('noRoomHint').style.display = 'none';
@@ -705,14 +676,13 @@ function processBookingsForCalendar(bookings){
   
   for(let d=1; d<=daysInMonth; d++){
     const ymd = `${state.year}-${pad2(state.month)}-${pad2(d)}`;
-    // Erom Logic: Kira status
     map[ymd] = { 
       date: ymd, 
       bookings: [], 
       totalMin: 0, 
       count: 0,
       isPast: ymd < today,
-      status: 'green' // Default
+      status: 'green' 
     };
   }
 
@@ -726,7 +696,6 @@ function processBookingsForCalendar(bookings){
     }
   });
 
-  // Tentukan status (Merah/Jingga/Hijau) ikut logik Erom
   Object.values(map).forEach(day => {
     if(day.totalMin >= 360 || day.count >= 6) {
       day.status = 'red';
@@ -753,9 +722,8 @@ function renderCalendar(){
 
   const docFrag = document.createDocumentFragment();
   const first = daysToShow[0];
-  const weekday = (new Date(first.date).getDay() + 6) % 7; // 0=Isnin
+  const weekday = (new Date(first.date).getDay() + 6) % 7; 
 
-  // Spacer untuk hari pertama
   for(let i=0; i<weekday; i++){ 
     const x = createEl('div', 'blank'); 
     docFrag.appendChild(x); 
@@ -773,11 +741,9 @@ function buildTile(day){
   const tile = createEl('div', `tile ${day.isPast || isWeekend ? 'disabled' : ''}`);
   tile.dataset.date = day.date;
 
-  // Header Tile
   const top = createEl('div', 'date');
-  top.textContent = Number(day.date.slice(8,10)); // Hari (1-31)
+  top.textContent = Number(day.date.slice(8,10)); 
 
-  // Badge Status
   if (!day.isPast && !isWeekend) {
     const statusMap = { 'red': 'PENUH', 'orange': 'SEPARA PENUH', 'green': 'TIADA TEMPAHAN' };
     const badge = createEl('span', `badge ${day.status}`);
@@ -786,7 +752,6 @@ function buildTile(day){
   }
   tile.appendChild(top);
 
-  // Body Tile
   const body = createEl('div', 'body');
   if(!day.isPast && !isWeekend){
     const list = createEl('div', 'small');
@@ -809,17 +774,14 @@ function buildTile(day){
   }
   tile.appendChild(body);
 
-  // Note: Event listener is attached to #grid parent, but tile properties matter
   return tile;
 }
 
-// LOGIK KLIK GRID (DIPERBAIKI UNTUK DEVTEST)
 function onGridClick(e){
   const tile = e.target.closest('.tile');
   if(!tile || tile.classList.contains('disabled')) return;
   const date = tile.dataset.date;
 
-  // Check Full Status
   const dayData = state.days.find(d => d.date === date);
   if (dayData && dayData.status === 'red') { 
     toastWarn('Bilik ini telah PENUH pada tarikh tersebut.'); 
@@ -828,7 +790,6 @@ function onGridClick(e){
 
   if(state.rangeMode){
     const clickedDate = date;
-    // Logik Erom Asal:
     if(!state.range.from){
        state.range.from = clickedDate;
        toastInfo('Tarikh mula dipilih');
@@ -843,18 +804,15 @@ function onGridClick(e){
        toastOk('Julat tarikh ditetapkan');
     }
     else {
-       // Reset jika kedua-dua sudah ada
        state.range = {from: clickedDate, to: null};
        toastInfo('Pilih tarikh akhir');
     }
     
-    // Kemaskini input melalui fungsi centralized
     $('fromDate').value = state.range.from || '';
     $('toDate').value = state.range.to || '';
-    onRangeChange(); // PENTING: Panggil validasi & highlight
+    onRangeChange(); 
   } 
   else {
-    // Mode Single Day
     document.querySelectorAll('.tile.sel').forEach(el => el.classList.remove('sel'));
     tile.classList.add('sel');
     state.selectedDate = date;
@@ -872,7 +830,6 @@ function setRangeMode(on){
   $('toDateWrap').style.display = on ? 'block' : 'none';
   $('rangeCounter').style.display = on ? 'block' : 'none';
   
-  // Reset selection
   state.range = {from:null, to:null};
   state.selectedDate = null;
   $('pickedDate').value = '';
@@ -896,23 +853,18 @@ function onDateChange(e){
   highlightSelectedTile(); 
 }
 
-// LOGIK HIGHLIGHT RANGE (FIXED SELECTOR)
 function highlightRangeTiles(){
-  // PENTING: Guna selector #grid untuk elak konflik dengan calendar overview yang tersembunyi
   document.querySelectorAll('#grid .tile.range').forEach(el=>el.classList.remove('range'));
   
   if(!state.range.from) return;
 
-  // Tambahan: Highlight Start Date (supaya user nampak pilihan pertama)
   if(state.range.from && !state.range.to){
      const el = document.querySelector(`#grid .tile[data-date="${state.range.from}"]`);
      if(el) el.classList.add('range');
      return;
   }
   
-  // Highlight Julat
   let d = state.range.from;
-  // Safety check untuk elak infinite loop jika tarikh tak valid
   if (state.range.to < state.range.from) return;
 
   while(d <= state.range.to){
@@ -928,7 +880,6 @@ function highlightSelectedTile(){
   if(el) el.classList.add('sel');
 }
 
-// FUNGSI BARU (DARI EROM)
 function onRangeChange(){
   state.range.from = $('fromDate').value || null; 
   state.range.to = $('toDate').value || null;
@@ -945,13 +896,12 @@ function updateRangeCounter(){
   const d1 = state.range.from, d2 = state.range.to;
   
   if(!d1 && !d2) { $('rangeCounter').textContent = 'Pilih julat tarikh...'; return; }
-  // Jika hanya satu tarikh dipilih
   if(d1 && !d2) { $('rangeCounter').textContent = 'Sila pilih tarikh akhir...'; return; }
   
   let count = 0, curr = d1;
   while(curr <= d2){
      const day = new Date(curr).getDay();
-     if(day !== 0 && day !== 6) count++; // Kecualikan Sabtu/Ahad
+     if(day !== 0 && day !== 6) count++; 
      curr = addDaysYMD(curr, 1);
   }
   $('rangeCounter').textContent = `Akan ditempah: ${count} hari bekerja`;
@@ -978,38 +928,33 @@ async function loadOverview(loading){
   ov.bookings = data || [];
   
   processOverviewData(ov.bookings);
-  populateUserFilter(); // Segarkan dropdown penempah berdasarkan bulan terkini
+  populateUserFilter(); 
 
   renderOvTable();
   renderOvCalendar();
 }
 
-// FUNGSI BARU: Janakan opsyen tapisan penempah secara dinamik
 function populateUserFilter() {
   const filterEl = $('ovUserFilter');
   if(!filterEl) return;
   
   filterEl.innerHTML = '<option value="">— Semua Penempah —</option>';
 
-  // Hanya proses jika pengguna telah log masuk (kerana UI disembunyikan tanpa sesi)
   if(!state.user) return;
 
   const today = todayYMD();
   let validBookings = ov.bookings.filter(b => toYMDNorm(b.tarikh) >= today);
 
-  // Jika bilik ditapis, kecilkan skop pengguna kepada bilik tersebut sahaja
   if(ov.filterRoom) {
       validBookings = validBookings.filter(b => b.bilik === ov.filterRoom);
   }
 
-  // Ekstrak nama pengguna yang unik dan susun secara abjad
   const uniqueNames = [...new Set(validBookings.map(b => b.nama_penempah))].sort();
   
   uniqueNames.forEach(name => {
       filterEl.appendChild(new Option(name, name));
   });
 
-  // Pulihkan pilihan sebelumnya jika wujud dalam senarai yang baru dijana
   filterEl.value = ov.filterUser;
 }
 
@@ -1059,22 +1004,18 @@ function switchOverviewView(view){
 }
 
 function renderOvTable(){
-  // [DEBUG] Semak identiti user di console
   console.log('[DEBUG] Render Table User:', state.user ? state.user.nama : 'Guest', '| Role:', state.user ? state.user.role : 'None');
 
   const tbody = $('ovTableBody'); 
-  tbody.innerHTML = ''; // Pastikan bersih sebelum loop
+  tbody.innerHTML = ''; 
   
   let list = ov.bookings;
   const today = todayYMD();
 
-  // KEMASKINI LOGIK: Tapis keluar tarikh yang sudah berlalu (hanya papar semasa dan akan datang)
   list = list.filter(b => toYMDNorm(b.tarikh) >= today);
 
-  // KEMASKINI LOGIK: Tapis bilik
   if(ov.filterRoom) list = list.filter(b => b.bilik === ov.filterRoom);
   
-  // KEMASKINI LOGIK: Tapis penempah
   if(ov.filterUser) list = list.filter(b => b.nama_penempah === ov.filterUser);
 
   if(!list.length){ 
@@ -1085,18 +1026,16 @@ function renderOvTable(){
   list.forEach(b => {
     const tr = createEl('tr');
     
-    // Auth Check
     let canAction = false;
     if(state.user && state.user.role){
        if(state.user.role === 'ADMIN') {
          canAction = true; 
        }
-       else if(state.user.nama === b.nama_penempah) { // Tarikh pasti future sebab sudah ditapis
+       else if(state.user.nama === b.nama_penempah) { 
          canAction = true;
        }
     }
 
-    // KEMASKINI LOGIK: Suntik Butang Edit dan Delete secara serentak
     let actionHtml = `<span style="color:#ccc; font-size:0.8rem;">-</span>`;
     
     if(canAction) {
@@ -1119,7 +1058,6 @@ function renderOvTable(){
     tbody.appendChild(tr);
   });
 
-  // Sambung event listeners
   document.querySelectorAll('.btn-icon-del').forEach(btn => {
     btn.addEventListener('click', () => cancelBooking(btn.dataset.id));
     btn.style.cssText = "background:none; border:none; cursor:pointer; font-size:1.1rem;";
@@ -1198,17 +1136,16 @@ function renderOvSummary(){
 }
 
 async function cancelBooking(id){
-  // [SAFETY GUARD] Pengesahan padam rekod (User/Self)
   const { isConfirmed } = await Swal.fire({
     title: 'HAPUSKAN TEMPAHAN?',
     text: "Tindakan ini akan memadam rekod anda secara kekal dan tidak boleh dikembalikan.",
     icon: 'warning',
     showCancelButton: true,
-    confirmButtonColor: '#d33', // Merah untuk bahaya
+    confirmButtonColor: '#d33',
     cancelButtonColor: '#3085d6',
     confirmButtonText: 'Ya, Hapus Serta-merta',
     cancelButtonText: 'Batal',
-    focusCancel: true // Letak fokus pada butang Batal (Safety)
+    focusCancel: true 
   });
 
   if(isConfirmed){
@@ -1224,7 +1161,7 @@ async function cancelBooking(id){
     if(data && data.ok){
       toastOk('Berjaya dibatalkan');
       loadOverview(false);
-      loadMyBookings(false); // Segar semula senarai tempahan saya
+      loadMyBookings(false); 
       if(state.room) refreshCalendar(false);
     } else {
       Swal.fire('Gagal', data?.error || 'Ralat', 'error');
@@ -1232,9 +1169,7 @@ async function cancelBooking(id){
   }
 }
 
-// FUNGSI BARU: Edit tempahan dari tab Rumusan ATAU tab Tempahan Saya
 async function openUserEditModal(id){
-  // Cari tempahan sama ada dalam data Rumusan atau data Tempahan Saya
   let b = ov.bookings.find(x => x.booking_id === id);
   if (!b) b = state.myBookings.find(x => x.booking_id === id);
   
@@ -1259,7 +1194,6 @@ async function openUserEditModal(id){
   });
 
   if(form){
-    // [SAFETY GUARD] Pengesahan Edit
     const isConfirmed = await modalConfirm(
       'Simpan Perubahan?',
       'Maklumat tempahan asal akan digantikan dengan data baharu.'
@@ -1267,7 +1201,6 @@ async function openUserEditModal(id){
     if (!isConfirmed) return;
 
     modalLoading('Menyimpan...');
-    // Gunakan fungsi yang sama seperti admin, ia mengesahkan email pemilik secara automatik.
     const { data } = await supa.rpc('fn_update_booking_secure_v2', {
       p_booking_id: id,
       p_email: state.user.email, 
@@ -1285,8 +1218,7 @@ async function openUserEditModal(id){
     if(data && data.ok){
       toastOk('Tempahan berjaya dikemaskini.');
       loadOverview(false);
-      loadMyBookings(false); // Segar semula senarai tempahan saya
-      // Jika tab Tempahan menunjukkan bilik yang sama dengan yang diubahsuai, segarkan kalendarnya juga.
+      loadMyBookings(false); 
       if(state.room === b.bilik) refreshCalendar(false);
     } else {
       Swal.fire('Ralat', data?.error || 'Ralat tidak diketahui', 'error');
@@ -1303,8 +1235,6 @@ async function loadMyBookings(showLoading) {
   
   const today = todayYMD();
 
-  // Memanggil terus rekod aktif dari sistem pangkalan data tanpa had bulan, 
-  // tetapi dihadkan kepada tarikh semasa/akan datang sahaja
   const { data, error } = await supa
     .from('v_bookings_active')
     .select('*')
@@ -1352,7 +1282,6 @@ function renderMyBookingsTable() {
     tbody.appendChild(tr);
   });
 
-  // Hubungkan event listeners untuk butang Batal & Edit pada tab ini
   document.querySelectorAll('.btn-icon-del-my').forEach(btn => {
     btn.addEventListener('click', () => cancelBooking(btn.dataset.id));
     btn.style.cssText = "background:none; border:none; cursor:pointer; font-size:1.1rem;";
@@ -1506,7 +1435,6 @@ async function executeBulkCancel(){
   
   const ids = Array.from(checked).map(c => c.value);
   
-  // [SAFETY GUARD] Langkah 1: Minta Sebab
   const { value: reason } = await Swal.fire({
     title: 'Sebab Pembatalan?',
     input: 'text',
@@ -1515,7 +1443,6 @@ async function executeBulkCancel(){
   });
   
   if(reason){
-    // [SAFETY GUARD] Langkah 2: Pengesahan Akhir
     const isConfirmed = await modalConfirm(
       'Sahkan Pembatalan Pukal?',
       `Anda akan membatalkan ${ids.length} tempahan terpilih dengan sebab: "${reason}".`
@@ -1535,7 +1462,7 @@ async function executeBulkCancel(){
     if(data && data.ok){
       toastOk(`${data.updated} tempahan dibatalkan.`);
       loadAdminBookingList(); 
-      loadMyBookings(false); // Kemaskini jika ada kaitan
+      loadMyBookings(false); 
     } else {
       Swal.fire('Ralat', data?.error, 'error');
     }
@@ -1592,8 +1519,141 @@ async function openEditModal(id){
       loadAdminBookingList();
       loadMyBookings(false); // Segar peribadi jika kaitan
       if(state.room) refreshCalendar(false);
+      // PENTING: Refresh Admin Search if active
+      if($('tabAdminSearch').classList.contains('active')) executeAdminSearch();
     } else {
       Swal.fire('Ralat', data?.error, 'error');
+    }
+  }
+}
+
+// FUNGSI BARU: Logik Carian Tempahan (Admin)
+async function executeAdminSearch() {
+  const startDate = $('adminSearchStartDate').value;
+  const endDate = $('adminSearchEndDate').value;
+  const room = $('adminSearchRoom').value;
+  const tbody = $('adminSearchTableBody');
+
+  if (!startDate || !endDate) {
+    return toastWarn('Sila pilih tarikh mula dan akhir');
+  }
+  if (startDate > endDate) {
+    return toastWarn('Tarikh mula mesti sebelum atau sama dengan tarikh akhir');
+  }
+
+  tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;padding:15px">Memuatkan...</td></tr>';
+  modalLoading('Mencari rekod...');
+
+  let query = supa
+    .from('v_bookings_active')
+    .select('*')
+    .gte('tarikh', startDate)
+    .lte('tarikh', endDate)
+    .order('tarikh', { ascending: true })
+    .order('masa_mula', { ascending: true });
+
+  if (room) {
+    query = query.eq('bilik', room);
+  }
+
+  const { data, error } = await query;
+  modalClose();
+
+  if (error) {
+    console.error(error);
+    tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:red">Ralat memuatkan carian.</td></tr>';
+    return toastErr('Gagal membuat carian');
+  }
+
+  if (!data || data.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;padding:15px">Tiada tempahan ditemui untuk kriteria ini.</td></tr>';
+    return;
+  }
+
+  tbody.innerHTML = '';
+  data.forEach(b => {
+    const tr = createEl('tr');
+    
+    const actionHtml = `
+      <div style="display:flex; gap:8px; justify-content:center;">
+        <button class="btn-icon-edit-search" data-id="${b.booking_id}" title="Kemaskini Tempahan">✏️</button>
+        <button class="btn-icon-del-search" data-id="${b.booking_id}" title="Batal Tempahan">🗑️</button>
+      </div>
+    `;
+
+    tr.innerHTML = `
+      <td>${b.tarikh}</td>
+      <td style="font-family:monospace">${toHHMM(b.masa_mula)}-${toHHMM(b.masa_tamat)}</td>
+      <td>${b.bilik}</td>
+      <td>${escapeHtml(b.tujuan)}</td>
+      <td><strong>${escapeHtml(b.nama_penempah)}</strong></td>
+      <td style="text-align:center">${actionHtml}</td>
+    `;
+    tbody.appendChild(tr);
+  });
+
+  document.querySelectorAll('.btn-icon-del-search').forEach(btn => {
+    btn.addEventListener('click', async () => {
+       await cancelBooking(btn.dataset.id);
+       executeAdminSearch(); // Refresh carian lepas delete
+    });
+    btn.style.cssText = "background:none; border:none; cursor:pointer; font-size:1.1rem;";
+  });
+
+  document.querySelectorAll('.btn-icon-edit-search').forEach(btn => {
+    btn.addEventListener('click', () => openAdminSearchEditModal(btn.dataset.id, data));
+    btn.style.cssText = "background:none; border:none; cursor:pointer; font-size:1.1rem;";
+  });
+}
+
+async function openAdminSearchEditModal(id, searchData){
+  const b = searchData.find(x => x.booking_id === id);
+  if(!b) return;
+
+  const { value: form } = await Swal.fire({
+    title: 'Edit Tempahan (Admin)',
+    html: `
+      <label class="small">Tarikh</label><input id="eDate" type="date" class="swal2-input" value="${toYMDNorm(b.tarikh)}">
+      <label class="small">Masa Mula</label><input id="eStart" type="time" class="swal2-input" value="${toHHMM(b.masa_mula)}">
+      <label class="small">Masa Tamat</label><input id="eEnd" type="time" class="swal2-input" value="${toHHMM(b.masa_tamat)}">
+      <label class="small">Tujuan</label><input id="eNote" class="swal2-input" value="${b.tujuan}">
+    `,
+    showCancelButton: true,
+    confirmButtonText: 'Simpan',
+    preConfirm: () => ({
+      d: $('eDate').value,
+      s: $('eStart').value,
+      e: $('eEnd').value,
+      n: $('eNote').value
+    })
+  });
+
+  if(form){
+    const isConfirmed = await modalConfirm('Simpan Perubahan?', 'Maklumat tempahan asal akan digantikan dengan data baharu.');
+    if (!isConfirmed) return;
+
+    modalLoading('Menyimpan...');
+    const { data } = await supa.rpc('fn_update_booking_secure_v2', {
+      p_booking_id: id,
+      p_email: state.user.email, // Admin email
+      p_date: form.d,
+      p_start: form.s,
+      p_end: form.e,
+      p_category: b.kategori,
+      p_note: form.n,
+      p_sektor: b.sektor,
+      p_nama: b.nama_penempah,
+      p_session_token: getSessionToken()
+    });
+    modalClose();
+    
+    if(data && data.ok){
+      toastOk('Tempahan berjaya dikemaskini.');
+      executeAdminSearch(); // Refresh list search
+      loadOverview(false); // Refresh background
+      if(state.room === b.bilik) refreshCalendar(false);
+    } else {
+      Swal.fire('Ralat', data?.error || 'Ralat tidak diketahui', 'error');
     }
   }
 }

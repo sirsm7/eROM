@@ -4,7 +4,6 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
   
-  <!-- PENTING: Konfigurasi PWA (Web App) -->
   <link rel="manifest" href="manifest.json">
   <meta name="theme-color" content="#1e3a8a">
   
@@ -18,29 +17,23 @@
   
   <link rel="icon" href="assets/img/logo-kpm.png" type="image/png" />
   
-  <!-- Fon Oswald -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Oswald:wght@400;500;700&display=swap" rel="stylesheet">
 
-  <!-- SweetAlert2 -->
   <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
 
-  <!-- Gaya utama (100% dari erom + extension) -->
   <link rel="stylesheet" href="./assets/css/style.css">
 </head>
 <body>
   <div class="wrap">
-    <!-- HEADER BARU (DENGAN FLEXBOX CONTAINER UNTUK LOGIN) -->
     <h1>
       <div class="header-flex-container">
-        <!-- KIRI: Logo & Tajuk -->
         <div class="header-title-group">
           <img src="assets/img/logo-kpm.png" alt="Logo KPM" class="header-logo">
           <span>eROM@AG — Sistem Pengurusan Tempahan Bilik PPD Alor Gajah</span>
         </div>
 
-        <!-- KANAN: Auth Controls -->
         <div class="auth-controls">
           <button id="mainLoginBtn" class="btn-login">LOG MASUK</button>
           <div id="userProfileBadge" class="user-badge">
@@ -54,12 +47,11 @@
     <div class="tabs">
       <button id="tabTempahanBtn" class="tabbtn active">Tempahan</button>
       <button id="tabKalendarBtn" class="tabbtn">Rumusan Tempahan</button>
-      <!-- Butang Tab Baharu: Tempahan Saya -->
       <button id="tabTempahanSayaBtn" class="tabbtn" style="display:none">Tempahan Saya</button>
       <button id="tabAdminBtn" class="tabbtn" style="display:none">Pentadbir</button>
+      <button id="tabAdminSearchBtn" class="tabbtn" style="display:none">Carian Tempahan</button>
     </div>
 
-    <!-- Tab Tempahan -->
     <section id="tabTempahan" class="tabpane active">
       <div class="card toolbar">
         <div>
@@ -101,7 +93,6 @@
       </div>
 
       <div class="card" style="margin-top:10px">
-        <!-- NOTIS LOGIN -->
         <div id="loginWarning" style="background:#fffbeb; color:#b45309; padding:12px; border-radius:10px; margin-bottom:16px; font-size:0.95rem; display:block; border:1px solid #fcd34d;">
           ⚠️ Sila <strong>Log Masuk</strong> untuk membuat tempahan baharu.
         </div>
@@ -182,7 +173,6 @@
       </div>
     </section>
 
-    <!-- Tab Rumusan -->
     <section id="tabKalendar" class="tabpane">
       <div class="card toolbar">
         <div>
@@ -193,7 +183,6 @@
               <option value="">— Semua Bilik —</option>
             </select>
           </div>
-          <!-- BINAAN BARU: Penapis Nama (Diseksyenkan dan hanya wujud bila di log masuk) -->
           <div id="ovUserFilterWrap" style="margin-top:8px; display:none;">
             <label class="small">Tapis Penempah:</label>
             <select id="ovUserFilter" style="padding:4px 8px; font-size:0.9rem; border-radius:8px;">
@@ -252,7 +241,6 @@
       </div>
     </section>
 
-    <!-- Tab Tempahan Saya (BARU) -->
     <section id="tabTempahanSaya" class="tabpane">
       <div class="card toolbar">
         <div>
@@ -284,11 +272,9 @@
       </div>
     </section>
 
-    <!-- Tab Admin -->
     <section id="tabAdmin" class="tabpane">
       <div class="card">
         
-        <!-- Notis jika belum login -->
         <div id="adminLoginBox" style="display:block; text-align:center; padding:40px;">
           <h3>Akses Pentadbir</h3>
           <p class="small">Sila log masuk menggunakan butang di atas sebagai Admin untuk mengakses panel ini.</p>
@@ -300,7 +286,6 @@
             <div class="small">Status: <span style="color:var(--ok); font-weight:bold;">AKTIF</span></div>
           </div>
 
-          <!-- BAHAGIAN 1: PENGURUSAN USER -->
           <div class="admin-user-section">
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
               <label class="small" style="font-size:0.9rem; margin:0;">Pengurusan Pengguna (Reset Kata Laluan)</label>
@@ -323,7 +308,6 @@
             </div>
           </div>
 
-          <!-- BAHAGIAN 2: PENGURUSAN BILIK -->
           <div>
             <label class="small" style="font-size:0.9rem;">Pengurusan Tempahan Bilik</label>
             <div class="row" style="margin-top:8px; gap:12px; align-items:end;">
@@ -346,9 +330,59 @@
         </div>
       </div>
     </section>
+
+    <!-- TAB BARU: CARIAN TEMPAHAN (ADMIN KHUSUS) -->
+    <section id="tabAdminSearch" class="tabpane">
+      <div class="card toolbar">
+        <div>
+          <div class="small" style="font-weight:600; font-size:1rem; color:var(--primary);">Carian Keseluruhan Tempahan (Admin)</div>
+          <div style="margin-top:4px;" class="small">Tapis tempahan berdasarkan julat tarikh dan bilik.</div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="row" style="margin-bottom:16px; align-items:end; gap:12px;">
+          <div>
+            <label class="small">Tarikh Mula</label><br>
+            <input type="date" id="adminSearchStartDate" required>
+          </div>
+          <div>
+            <label class="small">Tarikh Akhir</label><br>
+            <input type="date" id="adminSearchEndDate" required>
+          </div>
+          <div style="flex:1;">
+            <label class="small">Pilih Bilik</label><br>
+            <select id="adminSearchRoom" style="width:100%;">
+              <option value="">Semua Bilik</option>
+            </select>
+          </div>
+          <div>
+            <button class="btn" id="btnAdminExecuteSearch">Cari Tempahan</button>
+          </div>
+        </div>
+
+        <div style="overflow-x:auto;">
+          <table>
+            <thead>
+              <tr>
+                <th style="width:120px">Tarikh</th>
+                <th style="width:110px">Masa</th>
+                <th>Bilik</th>
+                <th>Tujuan</th>
+                <th style="width:200px">Penempah</th>
+                <th style="width:80px; text-align:center;">Tindakan</th>
+              </tr>
+            </thead>
+            <tbody id="adminSearchTableBody">
+              <tr><td colspan="6" style="text-align:center; padding:15px">Sila masukkan tarikh mula dan akhir, kemudian klik Cari Tempahan.</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
   </div>
 
-  <!-- API Scripts -->
   <script>
     window.API_E_ROM_BASE = ""; 
     if ('serviceWorker' in navigator) {
@@ -360,7 +394,6 @@
     }
   </script>
 
-  <!-- PENTING: Susunan Fail JS -->
   <script type="module" src="./src/api/supabaseClient.js"></script>
   <script type="module" src="./assets/js/app.js"></script>
 </body>
