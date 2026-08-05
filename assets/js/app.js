@@ -117,7 +117,7 @@ let ov = {
 
 let adminState = {
   bookings: [],
-  searchData: [] // Tambah simpan data carian
+  searchData: []
 };
 
 /* ==========================================================================
@@ -213,14 +213,12 @@ function setupUI(){
   if($('btnBulkCancel')) $('btnBulkCancel').addEventListener('click', executeBulkCancel);
   if($('btnAdminExecuteSearch')) $('btnAdminExecuteSearch').addEventListener('click', executeAdminSearch);
   
-  // Print Button Listener
   if($('btnAdminPrintSearch')) {
       $('btnAdminPrintSearch').addEventListener('click', () => {
           window.print();
       });
   }
   
-  // Search User Filter Change
   if($('adminSearchUserFilter')) {
       $('adminSearchUserFilter').addEventListener('change', renderAdminSearchTable);
   }
@@ -1017,8 +1015,6 @@ function switchOverviewView(view){
 }
 
 function renderOvTable(){
-  console.log('[DEBUG] Render Table User:', state.user ? state.user.nama : 'Guest', '| Role:', state.user ? state.user.role : 'None');
-
   const tbody = $('ovTableBody'); 
   tbody.innerHTML = ''; 
   
@@ -1582,7 +1578,7 @@ async function executeAdminSearch() {
     return toastErr('Gagal membuat carian');
   }
 
-  adminState.searchData = data || []; // Simpan data untuk ditapis
+  adminState.searchData = data || []; 
   
   populateAdminSearchUserFilter();
   renderAdminSearchTable();
@@ -1606,7 +1602,7 @@ function populateAdminSearchUserFilter() {
     });
     
     filterEl.disabled = false;
-    filterEl.value = ''; // Reset selection
+    filterEl.value = ''; 
 }
 
 function renderAdminSearchTable() {
@@ -1625,7 +1621,6 @@ function renderAdminSearchTable() {
       return;
     }
 
-    // Kira Statistik
     const totalBookings = data.length;
     const uniqueUsers = new Set(data.map(b => b.nama_penempah)).size;
     
@@ -1737,6 +1732,3 @@ async function openAdminSearchEditModal(id, searchData){
     }
   }
 }
-```
-`Status: Tiada lagi fail.`
-`✅ Pengekodan selesai.`
