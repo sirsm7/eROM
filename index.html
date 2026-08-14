@@ -305,9 +305,13 @@
           </div>
 
           <div class="admin-user-section">
+            <!-- Pindaan: Penambahan Butang "Tambah Pegawai" bersebelahan "Muat Semula" -->
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
-              <label class="small" style="font-size:0.9rem; margin:0;">Pengurusan Pengguna (Reset Kata Laluan)</label>
-              <button class="btn secondary" id="adminRefreshUsers" style="padding:6px 12px; font-size:0.8rem;">Muat Semula</button>
+              <label class="small" style="font-size:0.9rem; margin:0;">Pengurusan Pengguna</label>
+              <div style="display:flex; gap:8px;">
+                <button class="btn" id="adminAddUserBtn" style="padding:6px 12px; font-size:0.8rem; background:var(--ok);">+ Tambah Pegawai</button>
+                <button class="btn secondary" id="adminRefreshUsers" style="padding:6px 12px; font-size:0.8rem;">Muat Semula</button>
+              </div>
             </div>
             <div class="scrollable-table">
               <table>

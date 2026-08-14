@@ -208,6 +208,7 @@ function setupUI(){
 
   if($('btnRefreshMyBookings')) $('btnRefreshMyBookings').addEventListener('click', () => loadMyBookings(true));
 
+  if($('adminAddUserBtn')) $('adminAddUserBtn').addEventListener('click', adminAddUser);
   if($('adminRefreshUsers')) $('adminRefreshUsers').addEventListener('click', loadAdminUserList);
   if($('btnAdminLoad')) $('btnAdminLoad').addEventListener('click', loadAdminBookingList);
   if($('btnBulkCancel')) $('btnBulkCancel').addEventListener('click', executeBulkCancel);
@@ -1306,6 +1307,68 @@ function renderMyBookingsTable() {
 /* ==========================================================================
    10. ADMIN PANEL LOGIC (USER & BOOKING MANAGEMENT)
    ========================================================================== */
+
+/* 10.1 Tambah Pengguna Baharu */
+async function adminAddUser() {
+  const { value: formValues } = await Swal.fire({
+    title: 'Tambah Pegawai Baharu',
+    html: `
+      <div style="text-align:left;">
+        <label class="small">Nama Penuh</label>
+        <input id="swal-new-nama" class="swal2-input" placeholder="Contoh: Ahmad bin Ali" style="margin-top:5px; margin-bottom:15px;">
+        
+        <label class="small">Sektor / Unit</label>
+        <input id="swal-new-sektor" class="swal2-input" placeholder="Contoh: Sektor Pengurusan" style="margin-top:5px; margin-bottom:15px;">
+        
+        <label class="small">Emel Rasmi (ID Log Masuk)</label>
+        <input id="swal-new-email" type="email" class="swal2-input" placeholder="Contoh: ahmad@moe.gov.my" style="margin-top:5px; margin-bottom:15px;">
+        
+        <label class="small">Kata Laluan Sementara</label>
+        <input id="swal-new-pass" type="text" class="swal2-input" value="ppdag@12345" style="margin-top:5px;">
+      </div>
+    `,
+    focusConfirm: false,
+    showCancelButton: true,
+    confirmButtonText: 'Daftar Pegawai',
+    cancelButtonText: 'Batal',
+    preConfirm: () => {
+      const nama = $('swal-new-nama').value.trim();
+      const sektor = $('swal-new-sektor').value.trim();
+      const email = $('swal-new-email').value.trim();
+      const pass = $('swal-new-pass').value.trim();
+      
+      if (!nama || !sektor || !email || !pass) {
+        Swal.showValidationMessage('Sila lengkapkan semua ruang.');
+        return false;
+      }
+      return { nama, sektor, email, pass };
+    }
+  });
+
+  if (formValues) {
+    modalLoading('Mendaftar Pegawai...');
+    
+    // Andaian nama RPC untuk pendaftaran: fn_admin_create_user_v2
+    const { data } = await supa.rpc('fn_admin_create_user_v2', {
+      p_admin_email: state.user.email,
+      p_session_token: getSessionToken(),
+      p_new_email: formValues.email,
+      p_new_password: formValues.pass,
+      p_new_name: formValues.nama,
+      p_new_sektor: formValues.sektor
+    });
+    
+    modalClose();
+    
+    if (data && data.ok) {
+      Swal.fire('Berjaya', 'Pegawai baharu telah didaftarkan.', 'success');
+      loadAdminUserList(); // Muat semula senarai
+    } else {
+      Swal.fire('Gagal', data?.error || 'Ralat semasa mendaftar pegawai', 'error');
+    }
+  }
+}
+
 async function loadAdminUserList(){
   const tbody = $('adminUserListBody');
   if(!tbody) return;
@@ -1338,15 +1401,20 @@ async function loadAdminUserList(){
       <td style="padding:10px">${escapeHtml(u.nama)}</td>
       <td style="padding:10px">${escapeHtml(u.sektor)}</td>
       <td style="padding:10px">${escapeHtml(u.email)}</td>
-      <td style="padding:10px; text-align:center">
+      <td style="padding:10px; text-align:center; white-space:nowrap;">
         <button class="btn-reset" data-id="${u.id}" data-email="${u.email}">Reset</button>
+        <button class="btn-reset btn-delete-user" data-id="${u.id}" data-email="${u.email}" style="color:var(--bad); border-color:var(--bad); margin-left:5px;">Buang</button>
       </td>
     `;
     tbody.appendChild(tr);
   });
   
-  document.querySelectorAll('.btn-reset').forEach(btn => {
+  document.querySelectorAll('.btn-reset:not(.btn-delete-user)').forEach(btn => {
     btn.onclick = () => adminResetPassword(btn.dataset.id, btn.dataset.email);
+  });
+
+  document.querySelectorAll('.btn-delete-user').forEach(btn => {
+    btn.onclick = () => adminDeleteUser(btn.dataset.id, btn.dataset.email);
   });
 }
 
@@ -1368,6 +1436,44 @@ async function adminResetPassword(id, email){
     modalClose();
     if(data && data.ok) Swal.fire('Berjaya', 'Kata laluan telah ditetapkan semula.', 'success');
     else Swal.fire('Gagal', data?.error || 'Ralat tidak diketahui', 'error');
+  }
+}
+
+async function adminDeleteUser(id, email) {
+  // Keselamatan: Elakkan admin buang diri sendiri secara tak sengaja
+  if (email === state.user.email) {
+    return Swal.fire('Tidak Dibenarkan', 'Anda tidak boleh membuang akaun anda sendiri.', 'warning');
+  }
+
+  const { isConfirmed } = await Swal.fire({
+    title: 'Buang Pegawai?',
+    text: `Anda pasti mahu memadam akaun pegawai ${email}? Semua rekod login berkaitan akan terhapus. (Sila pastikan anda juga menguruskan tempahan bilik mereka jika perlu).`,
+    icon: 'warning',
+    showCancelButton: true,
+    confirmButtonColor: '#d33',
+    cancelButtonColor: '#3085d6',
+    confirmButtonText: 'Ya, Padam',
+    cancelButtonText: 'Batal'
+  });
+
+  if (isConfirmed) {
+    modalLoading('Memadam akaun...');
+    
+    // Andaian nama RPC untuk padam pengguna: fn_admin_delete_user_v2
+    const { data } = await supa.rpc('fn_admin_delete_user_v2', {
+      p_admin_email: state.user.email,
+      p_session_token: getSessionToken(),
+      p_target_id: id
+    });
+    
+    modalClose();
+    
+    if (data && data.ok) {
+      toastOk('Akaun pegawai telah dipadam.');
+      loadAdminUserList(); // Muat semula jadual
+    } else {
+      Swal.fire('Gagal', data?.error || 'Ralat semasa memadam pegawai', 'error');
+    }
   }
 }
 
