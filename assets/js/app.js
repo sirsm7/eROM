@@ -788,6 +788,23 @@ function buildTile(day){
         p.textContent = `${toHHMM(b.masa_mula)}–${toHHMM(b.masa_tamat)} • ${b.kategori}${note}`;
         list.appendChild(p);
       });
+
+      // BINA TOOLTIP CUSTOM (HOVER) UNTUK SENARAI TEMPAHAN
+      const tooltip = createEl('div', 'custom-tooltip');
+      const ul = createEl('ul');
+      
+      day.bookings.forEach(b => {
+        const li = createEl('li');
+        li.innerHTML = `
+          <strong>Masa:</strong> ${toHHMM(b.masa_mula)} - ${toHHMM(b.masa_tamat)}<br>
+          <strong>Penempah:</strong> ${escapeHtml(b.nama_penempah)} (${escapeHtml(b.sektor)})<br>
+          <strong>Tujuan:</strong> ${escapeHtml(b.tujuan)}
+        `;
+        ul.appendChild(li);
+      });
+      tooltip.appendChild(ul);
+      tile.appendChild(tooltip); // Append tooltip ke dalam tile
+
     } else {
       const p = createEl('div'); 
       p.className = 'small'; 
@@ -809,11 +826,11 @@ function onGridClick(e){
 
   const dayData = state.days.find(d => d.date === date);
 
-  // LOGIK PEMILIHAN TARIKH (Kekal berfungsi di latar belakang/serentak)
+  // LOGIK PEMILIHAN TARIKH SAHAJA (Senarai pop-up telah dialihkan ke hover/tooltip di buildTile)
   if(state.rangeMode){
     const clickedDate = date;
     
-    // Jangan benar pilih jika tarikh penuh, TETAPI biarkan popup senarai keluar nanti
+    // Jangan benar pilih jika tarikh penuh
     if(dayData && dayData.status === 'red') {
       toastWarn('Bilik ini telah PENUH pada tarikh tersebut. Anda tidak boleh menempahnya.');
     } else {
@@ -850,35 +867,6 @@ function onGridClick(e){
       $('pickedDate').value = date;
       toastInfo(`Tarikh dipilih: ${state.selectedDate}`);
     }
-  }
-
-  // LOGIK POPUP RINGKASAN TEMPAHAN HARI TERSEBUT
-  if (dayData && dayData.bookings && dayData.bookings.length > 0) {
-    let summaryHtml = `<div style="text-align:left; font-size:0.9rem; margin-top:10px;">
-        <ul style="padding-left: 20px; margin-bottom: 0;">`;
-    
-    dayData.bookings.forEach(b => {
-       summaryHtml += `
-         <li style="margin-bottom:10px; border-bottom:1px dashed #ccc; padding-bottom:10px;">
-           <strong>Masa:</strong> ${toHHMM(b.masa_mula)} - ${toHHMM(b.masa_tamat)}<br>
-           <strong>Penempah:</strong> ${escapeHtml(b.nama_penempah)} (${escapeHtml(b.sektor)})<br>
-           <strong>Tujuan:</strong> ${escapeHtml(b.tujuan)}
-         </li>
-       `;
-    });
-    
-    summaryHtml += `</ul></div>`;
-
-    Swal.fire({
-      title: `Senarai Tempahan (${date})`,
-      html: summaryHtml,
-      icon: 'info',
-      confirmButtonText: 'Tutup',
-      confirmButtonColor: '#3b82f6',
-      customClass: {
-        popup: 'swal-wide-popup' 
-      }
-    });
   }
 }
 
