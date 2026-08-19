@@ -1,6 +1,7 @@
 // assets/js/app.js
 import { supa } from "../../src/api/supabaseClient.js";
 
+/* STREAMING_CHUNK:Configuration & Constants */
 /* ==========================================================================
    1. KONSTANTA & TETAPAN (CONFIGURATION)
    ========================================================================== */
@@ -24,6 +25,7 @@ const ROOM_OPTIONS = [
 
 const CATEGORY_OPTIONS = ["Mesyuarat / Taklimat","Bengkel / Kursus","Lain-Lain"];
 
+/* STREAMING_CHUNK:Utility Functions */
 /* ==========================================================================
    2. UTILITIES
    ========================================================================== */
@@ -83,6 +85,7 @@ async function modalConfirm(title, text, confirmText = 'Ya, Teruskan') {
   return result.isConfirmed;
 }
 
+/* STREAMING_CHUNK:State Management Setup */
 /* ==========================================================================
    3. STATE MANAGEMENT
    ========================================================================== */
@@ -120,6 +123,7 @@ let adminState = {
   searchData: []
 };
 
+/* STREAMING_CHUNK:App Initialization */
 /* ==========================================================================
    4. INITIALIZATION (BOOTSTRAP)
    ========================================================================== */
@@ -149,6 +153,7 @@ async function bootstrap(){
   await loadOverview(true);
 }
 
+/* STREAMING_CHUNK:UI Setup & Event Listeners */
 function setupUI(){
   $('mainLoginBtn').addEventListener('click', showLoginModal);
   $('userProfileBadge').addEventListener('click', showUserProfile);
@@ -225,6 +230,7 @@ function setupUI(){
   }
 }
 
+/* STREAMING_CHUNK:UI Reset Functions */
 function resetUI(){
   const now = new Date(); 
   state.year = now.getFullYear(); 
@@ -298,6 +304,7 @@ function resetBookingForm(clearFields){
   highlightRangeTiles();
 }
 
+/* STREAMING_CHUNK:Navigation & Tabs Logic */
 function changeMonth(obj, delta, refreshCal){
   let m = obj.month + delta, y = obj.year;
   if(m<1){ m=12; y--; } else if(m>12){ m=1; y++; }
@@ -339,6 +346,7 @@ function toggleCalendarHint(){
   $('noRoomHint').style.display = state.room ? 'none' : 'block'; 
 }
 
+/* STREAMING_CHUNK:Authentication Functions */
 /* ==========================================================================
    5. AUTHENTICATION & SESSION MANAGEMENT
    ========================================================================== */
@@ -413,6 +421,7 @@ async function showLoginModal(){
   }
 }
 
+/* STREAMING_CHUNK:Post-Login Handling */
 function onLoginSuccess(){
   $('mainLoginBtn').style.display = 'none';
   $('userProfileBadge').classList.add('active');
@@ -546,6 +555,7 @@ async function changeOwnPassword(){
   }
 }
 
+/* STREAMING_CHUNK:Booking Creation Logic */
 /* ========= 6. BOOKING LOGIC (DYNAMIC FILL) ========= */
 function toggleBookingForm(enable){
   const fields = document.querySelectorAll('#bookingFormContainer input, #bookingFormContainer select, #bookingFormContainer button');
@@ -637,6 +647,7 @@ async function onBook(){
   }
 }
 
+/* STREAMING_CHUNK:Calendar Booking Data Processing */
 /* ==========================================================================
    7. CALENDAR LOGIC (Fixed for Devtest)
    ========================================================================== */
@@ -721,6 +732,7 @@ function processBookingsForCalendar(bookings){
   return Object.values(map); 
 }
 
+/* STREAMING_CHUNK:Calendar Rendering */
 function renderCalendar(){
   const grid = $('grid'); 
   grid.innerHTML = '';
@@ -789,50 +801,88 @@ function buildTile(day){
   return tile;
 }
 
+/* STREAMING_CHUNK:Calendar Grid Click & Selection Logic */
 function onGridClick(e){
   const tile = e.target.closest('.tile');
   if(!tile || tile.classList.contains('disabled')) return;
   const date = tile.dataset.date;
 
   const dayData = state.days.find(d => d.date === date);
-  if (dayData && dayData.status === 'red') { 
-    toastWarn('Bilik ini telah PENUH pada tarikh tersebut.'); 
-    return; 
-  }
 
+  // LOGIK PEMILIHAN TARIKH (Kekal berfungsi di latar belakang/serentak)
   if(state.rangeMode){
     const clickedDate = date;
-    if(!state.range.from){
-       state.range.from = clickedDate;
-       toastInfo('Tarikh mula dipilih');
-    }
-    else if(!state.range.to){
-       if(clickedDate < state.range.from){
-          state.range.to = state.range.from;
-          state.range.from = clickedDate;
-       } else {
-          state.range.to = clickedDate;
-       }
-       toastOk('Julat tarikh ditetapkan');
-    }
-    else {
-       state.range = {from: clickedDate, to: null};
-       toastInfo('Pilih tarikh akhir');
-    }
     
-    $('fromDate').value = state.range.from || '';
-    $('toDate').value = state.range.to || '';
-    onRangeChange(); 
+    // Jangan benar pilih jika tarikh penuh, TETAPI biarkan popup senarai keluar nanti
+    if(dayData && dayData.status === 'red') {
+      toastWarn('Bilik ini telah PENUH pada tarikh tersebut. Anda tidak boleh menempahnya.');
+    } else {
+      if(!state.range.from){
+         state.range.from = clickedDate;
+         toastInfo('Tarikh mula dipilih');
+      }
+      else if(!state.range.to){
+         if(clickedDate < state.range.from){
+            state.range.to = state.range.from;
+            state.range.from = clickedDate;
+         } else {
+            state.range.to = clickedDate;
+         }
+         toastOk('Julat tarikh ditetapkan');
+      }
+      else {
+         state.range = {from: clickedDate, to: null};
+         toastInfo('Pilih tarikh akhir');
+      }
+      
+      $('fromDate').value = state.range.from || '';
+      $('toDate').value = state.range.to || '';
+      onRangeChange(); 
+    }
   } 
   else {
-    document.querySelectorAll('.tile.sel').forEach(el => el.classList.remove('sel'));
-    tile.classList.add('sel');
-    state.selectedDate = date;
-    $('pickedDate').value = date;
-    toastInfo(`Tarikh dipilih: ${state.selectedDate}`);
+    if(dayData && dayData.status === 'red') {
+      toastWarn('Bilik ini telah PENUH pada tarikh tersebut. Anda tidak boleh menempahnya.');
+    } else {
+      document.querySelectorAll('.tile.sel').forEach(el => el.classList.remove('sel'));
+      tile.classList.add('sel');
+      state.selectedDate = date;
+      $('pickedDate').value = date;
+      toastInfo(`Tarikh dipilih: ${state.selectedDate}`);
+    }
+  }
+
+  // LOGIK POPUP RINGKASAN TEMPAHAN HARI TERSEBUT
+  if (dayData && dayData.bookings && dayData.bookings.length > 0) {
+    let summaryHtml = `<div style="text-align:left; font-size:0.9rem; margin-top:10px;">
+        <ul style="padding-left: 20px; margin-bottom: 0;">`;
+    
+    dayData.bookings.forEach(b => {
+       summaryHtml += `
+         <li style="margin-bottom:10px; border-bottom:1px dashed #ccc; padding-bottom:10px;">
+           <strong>Masa:</strong> ${toHHMM(b.masa_mula)} - ${toHHMM(b.masa_tamat)}<br>
+           <strong>Penempah:</strong> ${escapeHtml(b.nama_penempah)} (${escapeHtml(b.sektor)})<br>
+           <strong>Tujuan:</strong> ${escapeHtml(b.tujuan)}
+         </li>
+       `;
+    });
+    
+    summaryHtml += `</ul></div>`;
+
+    Swal.fire({
+      title: `Senarai Tempahan (${date})`,
+      html: summaryHtml,
+      icon: 'info',
+      confirmButtonText: 'Tutup',
+      confirmButtonColor: '#3b82f6',
+      customClass: {
+        popup: 'swal-wide-popup' 
+      }
+    });
   }
 }
 
+/* STREAMING_CHUNK:Date Range Management */
 function setRangeMode(on){
   state.rangeMode = on;
   $('toggleRangeOn').classList.toggle('active', on);
@@ -919,6 +969,7 @@ function updateRangeCounter(){
   $('rangeCounter').textContent = `Akan ditempah: ${count} hari bekerja`;
 }
 
+/* STREAMING_CHUNK:Overview Calendar Data Loading */
 /* ==========================================================================
    8. OVERVIEW LOGIC
    ========================================================================== */
@@ -1003,6 +1054,7 @@ function processOverviewData(bookings){
   ov.days = Array.from(daysMap.values());
 }
 
+/* STREAMING_CHUNK:Overview Calendar Rendering & Table */
 function switchOverviewView(view){
   ov.view = view;
   $('btnViewCalendar').classList.toggle('active', view==='calendar');
@@ -1145,6 +1197,7 @@ function renderOvSummary(){
   $('ovSummaryWrap').style.display='block';
 }
 
+/* STREAMING_CHUNK:Booking Cancellation & Updates */
 async function cancelBooking(id){
   const { isConfirmed } = await Swal.fire({
     title: 'HAPUSKAN TEMPAHAN?',
@@ -1237,6 +1290,7 @@ async function openUserEditModal(id){
   }
 }
 
+/* STREAMING_CHUNK:My Bookings Functions */
 /* ==========================================================================
    9. MY BOOKINGS LOGIC (TEMPAHAN SAYA)
    ========================================================================== */
@@ -1304,6 +1358,7 @@ function renderMyBookingsTable() {
   });
 }
 
+/* STREAMING_CHUNK:Admin User Management */
 /* ==========================================================================
    10. ADMIN PANEL LOGIC (USER & BOOKING MANAGEMENT)
    ========================================================================== */
@@ -1477,6 +1532,7 @@ async function adminDeleteUser(id, email) {
   }
 }
 
+/* STREAMING_CHUNK:Admin Booking Management */
 async function loadAdminBookingList(){
   const room = $('adminRoom').value;
   if(!room) return toastWarn('Sila pilih bilik dahulu');
@@ -1641,6 +1697,7 @@ async function openEditModal(id){
   }
 }
 
+/* STREAMING_CHUNK:Admin Search Features */
 /* ==========================================================================
    11. CARIAN TEMPAHAN (ADMIN KHUSUS)
    ========================================================================== */
