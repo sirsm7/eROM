@@ -1,5 +1,5 @@
-// KEMASKINI: VERSI 8 (RESET CACHE UNTUK CSP CONNECT-SRC GOOGLE FONTS)
-const CACHE_NAME = 'erom-ag-v8'; 
+// KEMASKINI: VERSI 9 (PENGASINGAN SAME-ORIGIN UNTUK ELAK ISU CSP CDN & 408)
+const CACHE_NAME = 'erom-ag-v9'; 
 const ASSETS_TO_CACHE = [
   './',
   './index.html',
@@ -11,10 +11,10 @@ const ASSETS_TO_CACHE = [
 
 // Install Service Worker
 self.addEventListener('install', (event) => {
-  self.skipWaiting(); // Paksa SW baru ambil alih segera
+  self.skipWaiting();
   event.waitUntil(
     caches.open(CACHE_NAME).then((cache) => {
-      console.log('[SW] Meng-cache aset asas (v8)');
+      console.log('[SW] Meng-cache aset asas (v9)');
       return cache.addAll(ASSETS_TO_CACHE);
     })
   );
@@ -34,13 +34,20 @@ self.addEventListener('activate', (event) => {
       );
     })
   );
-  return self.clients.claim(); // Ambil alih kawalan page segera
+  return self.clients.claim();
 });
 
-// Fetch Strategy: Network First dengan Error Handling Robust
+// Fetch Strategy: Network First dengan Had Same-Origin Sahaja
 self.addEventListener('fetch', (event) => {
-  // Abaikan POST requests (seperti panggilan RPC Supabase) - Biar terus ke network
-  if (event.request.method !== 'GET' || !event.request.url.startsWith('http')) {
+  if (event.request.method !== 'GET') {
+    return;
+  }
+
+  const requestUrl = new URL(event.request.url);
+
+  // Hadkan pemintasan hanya untuk domain setempat (Same-Origin)
+  // Permintaan ke CDN luaran (SweetAlert2, Cloudflare, Google Fonts) dilepaskan terus kepada pelayar
+  if (requestUrl.origin !== self.location.origin) {
     return;
   }
 
@@ -50,16 +57,13 @@ self.addEventListener('fetch', (event) => {
         return response;
       })
       .catch(() => {
-        // Jika offline atau network gagal, cuba cari dalam cache
         return caches.match(event.request).then((cachedResponse) => {
           if (cachedResponse) {
             return cachedResponse;
           }
-          // Fallback ke index.html jika navigasi gagal
           if (event.request.mode === 'navigate') {
-             return caches.match('./index.html');
+            return caches.match('./index.html');
           }
-          // Pulangkan respon kosong jika tiada apa-apa
           return new Response('', {
             status: 408,
             statusText: 'Request Timed Out / Offline'
