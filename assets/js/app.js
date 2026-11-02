@@ -5,7 +5,7 @@ import {
   setCache,
   deleteCacheByPrefix,
   clearExpiredCache
-} from "../../src/storage/db.js";
+} from "../../storage/db.js";
 
 /* ==========================================================================
    1. KONSTANTA & TETAPAN (CONFIGURATION)

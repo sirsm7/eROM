@@ -1,5 +1,5 @@
-// KEMASKINI: VERSI 9 (INTEGRASI INDEXEDDB CACHE MODULE)
-const CACHE_NAME = 'erom-ag-v9'; 
+// KEMASKINI: VERSI 10 (PEMBETULAN LALUAN MODUL INDEXEDDB STORAGE)
+const CACHE_NAME = 'erom-ag-v10'; 
 const ASSETS_TO_CACHE = [
   './',
   './index.html',
@@ -7,7 +7,7 @@ const ASSETS_TO_CACHE = [
   './assets/js/app.js',
   './assets/img/logo-kpm.png',
   './src/api/supabaseClient.js',
-  './src/storage/db.js'
+  './storage/db.js'
 ];
 
 // Install Service Worker
@@ -15,7 +15,7 @@ self.addEventListener('install', (event) => {
   self.skipWaiting(); // Paksa SW baru ambil alih segera
   event.waitUntil(
     caches.open(CACHE_NAME).then((cache) => {
-      console.log('[SW] Meng-cache aset asas (v9)');
+      console.log('[SW] Meng-cache aset asas (v10)');
       return cache.addAll(ASSETS_TO_CACHE);
     })
   );
