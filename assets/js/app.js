@@ -135,8 +135,10 @@ let adminState = {
   searchData: []
 };
 
+let realtimeChannelInstance = null;
+
 /* ==========================================================================
-   4. INITIALIZATION (BOOTSTRAP)
+   4. INITIALIZATION & REALTIME SETUP (BOOTSTRAP)
    ========================================================================== */
 window.addEventListener('load', bootstrap);
 
@@ -163,7 +165,71 @@ async function bootstrap(){
 
   toggleCalendarHint(); 
 
+  setupRealtimeSubscription();
+
   await loadOverview(true);
+}
+
+function setupRealtimeSubscription(){
+  try {
+    if(realtimeChannelInstance && supa.removeChannel){
+      supa.removeChannel(realtimeChannelInstance);
+      realtimeChannelInstance = null;
+    }
+
+    if(!supa.channel) {
+      console.warn('[Realtime] supa.channel tidak tersedia.');
+      return;
+    }
+
+    realtimeChannelInstance = supa.channel('public:erom_bookings')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'erom_bookings' },
+        async (payload) => {
+          console.log('[Realtime] Perubahan pangkalan data dikesan:', payload.eventType);
+          await handleRealtimePayload(payload);
+        }
+      )
+      .subscribe((status) => {
+        console.log('[Realtime] Status Langganan WebSocket:', status);
+      });
+  } catch(e) {
+    console.warn('[Realtime] Gagal memulakan langganan:', e);
+  }
+}
+
+async function handleRealtimePayload(payload){
+  await clearActiveCaches();
+
+  if(state.room){
+    refreshCalendar(false);
+  }
+  loadOverview(false);
+  if(state.user){
+    loadMyBookings(false);
+  }
+  if($('tabAdminSearch') && $('tabAdminSearch').classList.contains('active')){
+    executeAdminSearch();
+  }
+
+  const rec = payload.new || payload.old;
+  if(!rec) return;
+
+  const isSelf = state.user && (rec.nama_penempah === state.user.nama || rec.email === state.user.email);
+  if(!isSelf){
+    if(payload.eventType === 'INSERT'){
+      toastInfo(`Tempahan baharu diterima: ${rec.bilik || 'Bilik'}`);
+    } else if(payload.eventType === 'UPDATE'){
+      if(rec.status === 'DIBATALKAN'){
+        toastInfo(`Tempahan dibatalkan: ${rec.bilik || 'Bilik'}`);
+      } else {
+        toastInfo(`Jadual tempahan dikemaskini: ${rec.bilik || 'Bilik'}`);
+      }
+    } else if(payload.eventType === 'DELETE'){
+      toastInfo(`Rekod tempahan dikeluarkan.`);
+    }
+  }
 }
 
 function setupUI(){
