@@ -1,7 +1,12 @@
 // assets/js/app.js
 import { supa } from "../../src/api/supabaseClient.js";
+import {
+  getCacheEntry,
+  setCache,
+  deleteCacheByPrefix,
+  clearExpiredCache
+} from "../../src/storage/db.js";
 
-/* STREAMING_CHUNK:Configuration & Constants */
 /* ==========================================================================
    1. KONSTANTA & TETAPAN (CONFIGURATION)
    ========================================================================== */
@@ -25,7 +30,6 @@ const ROOM_OPTIONS = [
 
 const CATEGORY_OPTIONS = ["Mesyuarat / Taklimat","Bengkel / Kursus","Lain-Lain"];
 
-/* STREAMING_CHUNK:Utility Functions */
 /* ==========================================================================
    2. UTILITIES
    ========================================================================== */
@@ -85,7 +89,15 @@ async function modalConfirm(title, text, confirmText = 'Ya, Teruskan') {
   return result.isConfirmed;
 }
 
-/* STREAMING_CHUNK:State Management Setup */
+/* Cache Invalidation Helper */
+async function clearActiveCaches() {
+  await Promise.all([
+    deleteCacheByPrefix('cal_'),
+    deleteCacheByPrefix('ov_'),
+    deleteCacheByPrefix('my_')
+  ]).catch(e => console.warn('[Cache] Gagal memadam cache aktif:', e));
+}
+
 /* ==========================================================================
    3. STATE MANAGEMENT
    ========================================================================== */
@@ -123,7 +135,6 @@ let adminState = {
   searchData: []
 };
 
-/* STREAMING_CHUNK:App Initialization */
 /* ==========================================================================
    4. INITIALIZATION (BOOTSTRAP)
    ========================================================================== */
@@ -132,6 +143,8 @@ window.addEventListener('load', bootstrap);
 async function bootstrap(){
   setupUI();
   restoreSession(); 
+
+  clearExpiredCache().catch(err => console.warn('[Cache] Pembersihan automatik gagal:', err));
 
   const roomSel = $('roomSelect');
   const adminRoomSel = $('adminRoom');
@@ -153,7 +166,6 @@ async function bootstrap(){
   await loadOverview(true);
 }
 
-/* STREAMING_CHUNK:UI Setup & Event Listeners */
 function setupUI(){
   $('mainLoginBtn').addEventListener('click', showLoginModal);
   $('userProfileBadge').addEventListener('click', showUserProfile);
@@ -166,9 +178,10 @@ function setupUI(){
 
   $('roomSelect').addEventListener('change', onRoomSelectChange);
   
-  $('btnRefresh').addEventListener('click', ()=>{ 
+  $('btnRefresh').addEventListener('click', async ()=>{ 
+    await clearActiveCaches();
     resetUI(); 
-    toastInfo('Antara muka ditetapkan semula'); 
+    toastInfo('Antara muka & cache telah ditetapkan semula'); 
   });
   
   $('btnPrev').addEventListener('click', () => changeMonth(state, -1, true));
@@ -199,7 +212,7 @@ function setupUI(){
     const userFilterEl = $('ovUserFilter');
     if(userFilterEl) userFilterEl.value = '';
     
-    populateUserFilter();
+    populateUserFilter(); 
     renderOvTable(); 
   });
 
@@ -211,7 +224,12 @@ function setupUI(){
     });
   }
 
-  if($('btnRefreshMyBookings')) $('btnRefreshMyBookings').addEventListener('click', () => loadMyBookings(true));
+  if($('btnRefreshMyBookings')) {
+    $('btnRefreshMyBookings').addEventListener('click', async () => {
+      await deleteCacheByPrefix('my_');
+      loadMyBookings(true);
+    });
+  }
 
   if($('adminAddUserBtn')) $('adminAddUserBtn').addEventListener('click', adminAddUser);
   if($('adminRefreshUsers')) $('adminRefreshUsers').addEventListener('click', loadAdminUserList);
@@ -230,7 +248,6 @@ function setupUI(){
   }
 }
 
-/* STREAMING_CHUNK:UI Reset Functions */
 function resetUI(){
   const now = new Date(); 
   state.year = now.getFullYear(); 
@@ -304,7 +321,6 @@ function resetBookingForm(clearFields){
   highlightRangeTiles();
 }
 
-/* STREAMING_CHUNK:Navigation & Tabs Logic */
 function changeMonth(obj, delta, refreshCal){
   let m = obj.month + delta, y = obj.year;
   if(m<1){ m=12; y--; } else if(m>12){ m=1; y++; }
@@ -346,7 +362,6 @@ function toggleCalendarHint(){
   $('noRoomHint').style.display = state.room ? 'none' : 'block'; 
 }
 
-/* STREAMING_CHUNK:Authentication Functions */
 /* ==========================================================================
    5. AUTHENTICATION & SESSION MANAGEMENT
    ========================================================================== */
@@ -421,7 +436,6 @@ async function showLoginModal(){
   }
 }
 
-/* STREAMING_CHUNK:Post-Login Handling */
 function onLoginSuccess(){
   $('mainLoginBtn').style.display = 'none';
   $('userProfileBadge').classList.add('active');
@@ -470,6 +484,8 @@ async function onLogout(){
       console.warn('Session revoke failed', e);
     }
   }
+
+  deleteCacheByPrefix('my_').catch(e => console.warn('[Cache] Gagal membersihkan cache peribadi:', e));
 
   resetUserState();
   localStorage.removeItem('erom_user');
@@ -555,7 +571,6 @@ async function changeOwnPassword(){
   }
 }
 
-/* STREAMING_CHUNK:Booking Creation Logic */
 /* ========= 6. BOOKING LOGIC (DYNAMIC FILL) ========= */
 function toggleBookingForm(enable){
   const fields = document.querySelectorAll('#bookingFormContainer input, #bookingFormContainer select, #bookingFormContainer button');
@@ -633,6 +648,7 @@ async function onBook(){
 
     if(res.data && res.data.ok){
       Swal.fire('Berjaya', 'Tempahan telah direkodkan.', 'success');
+      await clearActiveCaches();
       if(state.room) refreshCalendar(false);
       loadOverview(false);
       loadMyBookings(false); 
@@ -647,7 +663,6 @@ async function onBook(){
   }
 }
 
-/* STREAMING_CHUNK:Calendar Booking Data Processing */
 /* ==========================================================================
    7. CALENDAR LOGIC (Fixed for Devtest)
    ========================================================================== */
@@ -671,25 +686,54 @@ function onRoomSelectChange(e){
 }
 
 async function refreshCalendar(showLoading){
-  if(showLoading) modalLoading('Memuatkan kalendar...');
-  
+  if(!state.room) return;
+
   const start = firstDay(state.year, state.month);
   const end = lastDay(state.year, state.month);
+  const cacheKey = `cal_${state.room}_${state.year}_${pad2(state.month)}`;
 
-  const { data, error } = await supa
-    .from('v_bookings_active')
-    .select('*')
-    .eq('bilik', state.room)
-    .gte('tarikh', start)
-    .lte('tarikh', end);
+  let hasCachedData = false;
+  try {
+    const cached = await getCacheEntry(cacheKey);
+    if (cached && Array.isArray(cached.data)) {
+      hasCachedData = true;
+      state.days = processBookingsForCalendar(cached.data);
+      renderCalendar();
+      highlightSelectedTile();
+      if(state.rangeMode) highlightRangeTiles();
+    }
+  } catch (err) {
+    console.warn('[Cache] Ralat membaca cache kalendar:', err);
+  }
 
-  if(showLoading) modalClose();
-  if(error) return toastErr('Gagal memuatkan data');
+  if(showLoading && !hasCachedData) modalLoading('Memuatkan kalendar...');
 
-  state.days = processBookingsForCalendar(data || []);
-  renderCalendar();
-  highlightSelectedTile();
-  if(state.rangeMode) highlightRangeTiles();
+  try {
+    const { data, error } = await supa
+      .from('v_bookings_active')
+      .select('*')
+      .eq('bilik', state.room)
+      .gte('tarikh', start)
+      .lte('tarikh', end);
+
+    if(showLoading && !hasCachedData) modalClose();
+
+    if(error){
+      if(!hasCachedData) toastErr('Gagal memuatkan data');
+      return;
+    }
+
+    const freshData = data || [];
+    state.days = processBookingsForCalendar(freshData);
+    renderCalendar();
+    highlightSelectedTile();
+    if(state.rangeMode) highlightRangeTiles();
+
+    setCache(cacheKey, freshData, 300).catch(e => console.warn('[Cache] Gagal menyimpan cache kalendar:', e));
+  } catch(e) {
+    if(showLoading && !hasCachedData) modalClose();
+    if(!hasCachedData) toastErr('Ralat rangkaian kalendar');
+  }
 }
 
 function processBookingsForCalendar(bookings){
@@ -732,7 +776,6 @@ function processBookingsForCalendar(bookings){
   return Object.values(map); 
 }
 
-/* STREAMING_CHUNK:Calendar Rendering */
 function renderCalendar(){
   const grid = $('grid'); 
   grid.innerHTML = '';
@@ -801,7 +844,6 @@ function buildTile(day){
   return tile;
 }
 
-/* STREAMING_CHUNK:Calendar Grid Click & Selection Logic */
 function onGridClick(e){
   const tile = e.target.closest('.tile');
   if(!tile || tile.classList.contains('disabled')) return;
@@ -809,11 +851,9 @@ function onGridClick(e){
 
   const dayData = state.days.find(d => d.date === date);
 
-  // LOGIK PEMILIHAN TARIKH (Kekal berfungsi di latar belakang/serentak)
   if(state.rangeMode){
     const clickedDate = date;
     
-    // Jangan benar pilih jika tarikh penuh, TETAPI biarkan popup senarai keluar nanti
     if(dayData && dayData.status === 'red') {
       toastWarn('Bilik ini telah PENUH pada tarikh tersebut. Anda tidak boleh menempahnya.');
     } else {
@@ -852,7 +892,6 @@ function onGridClick(e){
     }
   }
 
-  // LOGIK POPUP RINGKASAN TEMPAHAN HARI TERSEBUT
   if (dayData && dayData.bookings && dayData.bookings.length > 0) {
     let summaryHtml = `<div style="text-align:left; font-size:0.9rem; margin-top:10px;">
         <ul style="padding-left: 20px; margin-bottom: 0;">`;
@@ -882,7 +921,6 @@ function onGridClick(e){
   }
 }
 
-/* STREAMING_CHUNK:Date Range Management */
 function setRangeMode(on){
   state.rangeMode = on;
   $('toggleRangeOn').classList.toggle('active', on);
@@ -969,32 +1007,59 @@ function updateRangeCounter(){
   $('rangeCounter').textContent = `Akan ditempah: ${count} hari bekerja`;
 }
 
-/* STREAMING_CHUNK:Overview Calendar Data Loading */
 /* ==========================================================================
    8. OVERVIEW LOGIC
    ========================================================================== */
 async function loadOverview(loading){
-  if(loading) modalLoading('Mengemaskini...');
   const start = firstDay(ov.year, ov.month);
   const end = lastDay(ov.year, ov.month);
+  const cacheKey = `ov_${ov.year}_${pad2(ov.month)}`;
 
-  const { data } = await supa
-    .from('v_bookings_active')
-    .select('*')
-    .gte('tarikh', start)
-    .lte('tarikh', end)
-    .order('tarikh', {ascending:true})
-    .order('masa_mula', {ascending:true});
+  let hasCachedData = false;
+  try {
+    const cached = await getCacheEntry(cacheKey);
+    if(cached && Array.isArray(cached.data)){
+      hasCachedData = true;
+      ov.bookings = cached.data;
+      processOverviewData(ov.bookings);
+      populateUserFilter();
+      renderOvTable();
+      renderOvCalendar();
+    }
+  } catch(err) {
+    console.warn('[Cache] Ralat membaca cache rumusan:', err);
+  }
 
-  if(loading) modalClose();
-  
-  ov.bookings = data || [];
-  
-  processOverviewData(ov.bookings);
-  populateUserFilter(); 
+  if(loading && !hasCachedData) modalLoading('Mengemaskini...');
 
-  renderOvTable();
-  renderOvCalendar();
+  try {
+    const { data, error } = await supa
+      .from('v_bookings_active')
+      .select('*')
+      .gte('tarikh', start)
+      .lte('tarikh', end)
+      .order('tarikh', {ascending:true})
+      .order('masa_mula', {ascending:true});
+
+    if(loading && !hasCachedData) modalClose();
+
+    if(error){
+      console.error(error);
+      return;
+    }
+
+    const freshData = data || [];
+    ov.bookings = freshData;
+    processOverviewData(ov.bookings);
+    populateUserFilter();
+    renderOvTable();
+    renderOvCalendar();
+
+    setCache(cacheKey, freshData, 300).catch(e => console.warn('[Cache] Gagal menyimpan cache rumusan:', e));
+  } catch(e) {
+    if(loading && !hasCachedData) modalClose();
+    console.error(e);
+  }
 }
 
 function populateUserFilter() {
@@ -1054,7 +1119,6 @@ function processOverviewData(bookings){
   ov.days = Array.from(daysMap.values());
 }
 
-/* STREAMING_CHUNK:Overview Calendar Rendering & Table */
 function switchOverviewView(view){
   ov.view = view;
   $('btnViewCalendar').classList.toggle('active', view==='calendar');
@@ -1197,7 +1261,6 @@ function renderOvSummary(){
   $('ovSummaryWrap').style.display='block';
 }
 
-/* STREAMING_CHUNK:Booking Cancellation & Updates */
 async function cancelBooking(id){
   const { isConfirmed } = await Swal.fire({
     title: 'HAPUSKAN TEMPAHAN?',
@@ -1223,6 +1286,7 @@ async function cancelBooking(id){
     
     if(data && data.ok){
       toastOk('Berjaya dibatalkan');
+      await clearActiveCaches();
       loadOverview(false);
       loadMyBookings(false); 
       if(state.room) refreshCalendar(false);
@@ -1281,6 +1345,7 @@ async function openUserEditModal(id){
     
     if(data && data.ok){
       toastOk('Tempahan berjaya dikemaskini.');
+      await clearActiveCaches();
       loadOverview(false);
       loadMyBookings(false); 
       if(state.room === b.bilik) refreshCalendar(false);
@@ -1290,34 +1355,55 @@ async function openUserEditModal(id){
   }
 }
 
-/* STREAMING_CHUNK:My Bookings Functions */
 /* ==========================================================================
    9. MY BOOKINGS LOGIC (TEMPAHAN SAYA)
    ========================================================================== */
 async function loadMyBookings(showLoading) {
   if (!state.user) return;
-  if (showLoading) modalLoading('Memuatkan senarai tempahan anda...');
-  
+
   const today = todayYMD();
+  const cacheKey = `my_${encodeURIComponent(state.user.nama)}_${today}`;
 
-  const { data, error } = await supa
-    .from('v_bookings_active')
-    .select('*')
-    .eq('nama_penempah', state.user.nama)
-    .gte('tarikh', today) 
-    .order('tarikh', {ascending:true})
-    .order('masa_mula', {ascending:true});
-
-  if (showLoading) modalClose();
-
-  if(error) {
-    console.error(error);
-    toastErr('Gagal memuatkan tempahan peribadi.');
-    return;
+  let hasCachedData = false;
+  try {
+    const cached = await getCacheEntry(cacheKey);
+    if(cached && Array.isArray(cached.data)){
+      hasCachedData = true;
+      state.myBookings = cached.data;
+      renderMyBookingsTable();
+    }
+  } catch(err) {
+    console.warn('[Cache] Ralat membaca cache tempahan saya:', err);
   }
 
-  state.myBookings = data || [];
-  renderMyBookingsTable();
+  if (showLoading && !hasCachedData) modalLoading('Memuatkan senarai tempahan anda...');
+
+  try {
+    const { data, error } = await supa
+      .from('v_bookings_active')
+      .select('*')
+      .eq('nama_penempah', state.user.nama)
+      .gte('tarikh', today) 
+      .order('tarikh', {ascending:true})
+      .order('masa_mula', {ascending:true});
+
+    if (showLoading && !hasCachedData) modalClose();
+
+    if(error) {
+      console.error(error);
+      if(!hasCachedData) toastErr('Gagal memuatkan tempahan peribadi.');
+      return;
+    }
+
+    const freshData = data || [];
+    state.myBookings = freshData;
+    renderMyBookingsTable();
+
+    setCache(cacheKey, freshData, 180).catch(e => console.warn('[Cache] Gagal menyimpan cache peribadi:', e));
+  } catch(e) {
+    if(showLoading && !hasCachedData) modalClose();
+    if(!hasCachedData) toastErr('Ralat rangkaian tempahan saya');
+  }
 }
 
 function renderMyBookingsTable() {
@@ -1358,7 +1444,6 @@ function renderMyBookingsTable() {
   });
 }
 
-/* STREAMING_CHUNK:Admin User Management */
 /* ==========================================================================
    10. ADMIN PANEL LOGIC (USER & BOOKING MANAGEMENT)
    ========================================================================== */
@@ -1403,7 +1488,6 @@ async function adminAddUser() {
   if (formValues) {
     modalLoading('Mendaftar Pegawai...');
     
-    // Andaian nama RPC untuk pendaftaran: fn_admin_create_user_v2
     const { data } = await supa.rpc('fn_admin_create_user_v2', {
       p_admin_email: state.user.email,
       p_session_token: getSessionToken(),
@@ -1417,7 +1501,7 @@ async function adminAddUser() {
     
     if (data && data.ok) {
       Swal.fire('Berjaya', 'Pegawai baharu telah didaftarkan.', 'success');
-      loadAdminUserList(); // Muat semula senarai
+      loadAdminUserList(); 
     } else {
       Swal.fire('Gagal', data?.error || 'Ralat semasa mendaftar pegawai', 'error');
     }
@@ -1495,7 +1579,6 @@ async function adminResetPassword(id, email){
 }
 
 async function adminDeleteUser(id, email) {
-  // Keselamatan: Elakkan admin buang diri sendiri secara tak sengaja
   if (email === state.user.email) {
     return Swal.fire('Tidak Dibenarkan', 'Anda tidak boleh membuang akaun anda sendiri.', 'warning');
   }
@@ -1514,7 +1597,6 @@ async function adminDeleteUser(id, email) {
   if (isConfirmed) {
     modalLoading('Memadam akaun...');
     
-    // Andaian nama RPC untuk padam pengguna: fn_admin_delete_user_v2
     const { data } = await supa.rpc('fn_admin_delete_user_v2', {
       p_admin_email: state.user.email,
       p_session_token: getSessionToken(),
@@ -1525,14 +1607,13 @@ async function adminDeleteUser(id, email) {
     
     if (data && data.ok) {
       toastOk('Akaun pegawai telah dipadam.');
-      loadAdminUserList(); // Muat semula jadual
+      loadAdminUserList(); 
     } else {
       Swal.fire('Gagal', data?.error || 'Ralat semasa memadam pegawai', 'error');
     }
   }
 }
 
-/* STREAMING_CHUNK:Admin Booking Management */
 async function loadAdminBookingList(){
   const room = $('adminRoom').value;
   if(!room) return toastWarn('Sila pilih bilik dahulu');
@@ -1633,8 +1714,11 @@ async function executeBulkCancel(){
     
     if(data && data.ok){
       toastOk(`${data.updated} tempahan dibatalkan.`);
+      await clearActiveCaches();
       loadAdminBookingList(); 
       loadMyBookings(false); 
+      if(state.room) refreshCalendar(false);
+      loadOverview(false);
     } else {
       Swal.fire('Ralat', data?.error, 'error');
     }
@@ -1687,17 +1771,18 @@ async function openEditModal(id){
     
     if(data && data.ok){
       toastOk('Tempahan dikemaskini.');
+      await clearActiveCaches();
       loadAdminBookingList();
       loadMyBookings(false); 
       if(state.room) refreshCalendar(false);
+      loadOverview(false);
       if($('tabAdminSearch').classList.contains('active')) executeAdminSearch();
     } else {
-      Swal.fire('Ralat', data?.error, 'error');
+      Swal.fire('Ralat', data?.error || 'Ralat tidak diketahui', 'error');
     }
   }
 }
 
-/* STREAMING_CHUNK:Admin Search Features */
 /* ==========================================================================
    11. CARIAN TEMPAHAN (ADMIN KHUSUS)
    ========================================================================== */
@@ -1887,8 +1972,10 @@ async function openAdminSearchEditModal(id, searchData){
     
     if(data && data.ok){
       toastOk('Tempahan berjaya dikemaskini.');
+      await clearActiveCaches();
       executeAdminSearch(); 
       loadOverview(false); 
+      loadMyBookings(false);
       if(state.room === b.bilik) refreshCalendar(false);
     } else {
       Swal.fire('Ralat', data?.error || 'Ralat tidak diketahui', 'error');
