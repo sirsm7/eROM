@@ -12,5 +12,8 @@ const client = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 // Wrapper untuk memudahkan panggilan dalam app.js
 export const supa = {
   rpc: (fnName, params) => client.rpc(fnName, params),
-  from: (tableName) => client.from(tableName)
+  from: (tableName) => client.from(tableName),
+  channel: (channelName, opts) => client.channel(channelName, opts),
+  removeChannel: (channel) => client.removeChannel(channel),
+  client: client
 };
