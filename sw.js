@@ -1,5 +1,5 @@
-// KEMASKINI: VERSI 7 (RESET CACHE UNTUK SECURITY HEADERS & STRUKTUR CSS BAHARU)
-const CACHE_NAME = 'erom-ag-v7'; 
+// KEMASKINI: VERSI 8 (RESET CACHE UNTUK CSP CONNECT-SRC GOOGLE FONTS)
+const CACHE_NAME = 'erom-ag-v8'; 
 const ASSETS_TO_CACHE = [
   './',
   './index.html',
@@ -14,7 +14,7 @@ self.addEventListener('install', (event) => {
   self.skipWaiting(); // Paksa SW baru ambil alih segera
   event.waitUntil(
     caches.open(CACHE_NAME).then((cache) => {
-      console.log('[SW] Meng-cache aset asas (v7)');
+      console.log('[SW] Meng-cache aset asas (v8)');
       return cache.addAll(ASSETS_TO_CACHE);
     })
   );
