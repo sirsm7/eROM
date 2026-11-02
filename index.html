@@ -24,24 +24,6 @@
   <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
 
   <link rel="stylesheet" href="./assets/css/style.css">
-  
-  <style>
-    /* Print Styles */
-    @media print {
-      body * { visibility: hidden; }
-      #tabAdminSearch, #tabAdminSearch * { visibility: visible; }
-      #tabAdminSearch { position: absolute; left: 0; top: 0; width: 100%; }
-      .toolbar, .btn, .tabs, h1, .auth-controls { display: none !important; }
-      #adminSearchFilterForm { display: none !important; }
-      .card { border: none; box-shadow: none; margin: 0; padding: 0; }
-      table { border-collapse: collapse; width: 100%; }
-      th, td { border: 1px solid #000; padding: 8px; font-size: 12px; }
-      th { background-color: #f2f2f2 !important; -webkit-print-color-adjust: exact; }
-      /* Hide the 'Tindakan' column in print */
-      th:last-child, td:last-child { display: none; }
-      #adminSearchStats { border: 1px solid #000; margin-bottom: 20px; padding: 10px; }
-    }
-  </style>
 </head>
 <body>
   <div class="wrap">
@@ -305,7 +287,6 @@
           </div>
 
           <div class="admin-user-section">
-            <!-- Pindaan: Penambahan Butang "Tambah Pegawai" bersebelahan "Muat Semula" -->
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
               <label class="small" style="font-size:0.9rem; margin:0;">Pengurusan Pengguna</label>
               <div style="display:flex; gap:8px;">
@@ -407,7 +388,7 @@
                 <th style="width:100px">Masa</th>
                 <th>Bilik</th>
                 <th>Tujuan</th>
-                <th>Sektor</th> <!-- Added Sektor column -->
+                <th>Sektor</th>
                 <th style="width:180px">Penempah</th>
                 <th style="width:80px; text-align:center;">Tindakan</th>
               </tr>

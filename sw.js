@@ -1,5 +1,5 @@
-// KEMASKINI: VERSI 5 (PAKSA RESET CACHE UNTUK MIGRASI DB)
-const CACHE_NAME = 'erom-ag-v6'; 
+// KEMASKINI: VERSI 7 (RESET CACHE UNTUK SECURITY HEADERS & STRUKTUR CSS BAHARU)
+const CACHE_NAME = 'erom-ag-v7'; 
 const ASSETS_TO_CACHE = [
   './',
   './index.html',
@@ -14,7 +14,7 @@ self.addEventListener('install', (event) => {
   self.skipWaiting(); // Paksa SW baru ambil alih segera
   event.waitUntil(
     caches.open(CACHE_NAME).then((cache) => {
-      console.log('[SW] Meng-cache aset asas (v5)');
+      console.log('[SW] Meng-cache aset asas (v7)');
       return cache.addAll(ASSETS_TO_CACHE);
     })
   );

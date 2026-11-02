@@ -469,3 +469,61 @@ tr:last-child td { border-bottom: none; }
   .auth-controls { margin-left: 0; width: 100%; justify-content: flex-end; margin-top: -30px; } 
   .header-title-group { max-width: 80%; }
 }
+
+/* ========================================= */
+/* === PRINT STYLES (Dipindahkan dari HTML) === */
+/* ========================================= */
+@media print {
+  body * {
+    visibility: hidden;
+  }
+  #tabAdminSearch,
+  #tabAdminSearch * {
+    visibility: visible;
+  }
+  #tabAdminSearch {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+  }
+  .toolbar,
+  .btn,
+  .tabs,
+  h1,
+  .auth-controls {
+    display: none !important;
+  }
+  #adminSearchFilterForm {
+    display: none !important;
+  }
+  .card {
+    border: none;
+    box-shadow: none;
+    margin: 0;
+    padding: 0;
+  }
+  table {
+    border-collapse: collapse;
+    width: 100%;
+  }
+  th,
+  td {
+    border: 1px solid #000;
+    padding: 8px;
+    font-size: 12px;
+  }
+  th {
+    background-color: #f2f2f2 !important;
+    -webkit-print-color-adjust: exact;
+  }
+  th:last-child,
+  td:last-child {
+    display: none;
+  }
+  #adminSearchStats {
+    border: 1px solid #000;
+    margin-bottom: 20px;
+    padding: 10px;
+  }
+}
