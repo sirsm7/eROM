@@ -137,7 +137,7 @@ export async function getCacheEntry(key) {
       };
 
       req.onerror = () => {
-        if (typeof window !== 'undefined' && window.__memoryCache && window.__memoryCache.has(key)) {
+        if (typeof window !== 'undefined' && window.__memoryCache) {
           const memItem = window.__memoryCache.get(key);
           const now = Date.now();
           const age = now - memItem.timestamp;
@@ -150,7 +150,7 @@ export async function getCacheEntry(key) {
         resolve(null);
       };
     } catch {
-      if (typeof window !== 'undefined' && window.__memoryCache && window.__memoryCache.has(key)) {
+      if (typeof window !== 'undefined' && window.__memoryCache) {
         const memItem = window.__memoryCache.get(key);
         const now = Date.now();
         const age = now - memItem.timestamp;

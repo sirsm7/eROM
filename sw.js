@@ -1,4 +1,4 @@
-const CACHE_NAME = 'erom-ag-v11';
+const CACHE_NAME = 'erom-ag-v12';
 const ASSETS_TO_CACHE = [
   './',
   './index.html',
@@ -30,33 +30,50 @@ self.addEventListener('activate', (event) => {
           }
         })
       );
-    })
+    }).then(() => self.clients.claim())
   );
-  return self.clients.claim();
 });
 
 self.addEventListener('fetch', (event) => {
-  if (event.request.method !== 'GET' || !event.request.url.startsWith('http')) {
+  if (event.request.method !== 'GET') {
+    return;
+  }
+
+  const url = new URL(event.request.url);
+
+  if (url.origin !== self.location.origin) {
+    return;
+  }
+
+  if (url.pathname.startsWith('/api/')) {
     return;
   }
 
   event.respondWith(
     fetch(event.request)
-      .then((response) => {
-        return response;
-      })
-      .catch(() => {
-        return caches.match(event.request).then((cachedResponse) => {
-          if (cachedResponse) {
-            return cachedResponse;
-          }
-          if (event.request.mode === 'navigate') {
-            return caches.match('./index.html');
-          }
-          return new Response('', {
-            status: 408,
-            statusText: 'Request Timed Out / Offline'
+      .then((networkResponse) => {
+        if (networkResponse && networkResponse.status === 200 && networkResponse.type === 'basic') {
+          const responseClone = networkResponse.clone();
+          caches.open(CACHE_NAME).then((cache) => {
+            cache.put(event.request, responseClone);
           });
+        }
+        return networkResponse;
+      })
+      .catch(async () => {
+        const cachedResponse = await caches.match(event.request);
+        if (cachedResponse) {
+          return cachedResponse;
+        }
+        if (event.request.mode === 'navigate') {
+          const fallbackResponse = await caches.match('./index.html');
+          if (fallbackResponse) {
+            return fallbackResponse;
+          }
+        }
+        return new Response('Offline', {
+          status: 503,
+          statusText: 'Service Unavailable'
         });
       })
   );
