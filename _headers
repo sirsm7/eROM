@@ -1,14 +1,13 @@
 /*
-  Strict-Transport-Security: max-age=31536000; includeSubDomains; preload
+  X-Frame-Options: DENY
   X-Content-Type-Options: nosniff
-  X-Frame-Options: SAMEORIGIN
   Referrer-Policy: strict-origin-when-cross-origin
-  Cross-Origin-Opener-Policy: same-origin
-  Cross-Origin-Resource-Policy: same-origin
-  Cross-Origin-Embedder-Policy: credentialless
-  X-Permitted-Cross-Domain-Policies: none
-  X-DNS-Prefetch-Control: off
-  Origin-Agent-Cluster: ?1
-  X-XSS-Protection: 0
-  Permissions-Policy: geolocation=(), microphone=(), camera=(), payment=(), usb=(), display-capture=()
-  Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.tailwindcss.com https://cdn.jsdelivr.net https://cdnjs.cloudflare.com https://unpkg.com https://cdn.quilljs.com https://esm.sh https://static.cloudflareinsights.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdn.jsdelivr.net https://cdnjs.cloudflare.com https://cdn.quilljs.com; font-src 'self' data: https://fonts.gstatic.com https://cdnjs.cloudflare.com; img-src 'self' data: blob: https://app.tech4ag.my https://ui-avatars.com https://lh3.googleusercontent.com https://img.youtube.com; connect-src 'self' https://app.tech4ag.my wss://app.tech4ag.my https://smpid.ppdag.deno.net https://script.google.com https://script.googleusercontent.com https://esm.sh https://cloudflareinsights.com https://static.cloudflareinsights.com https://fonts.googleapis.com https://fonts.gstatic.com https://cdn.jsdelivr.net; frame-src 'self' https://drive.google.com https://www.youtube.com https://anyflip.com https://app.powerbi.com; frame-ancestors 'self'; base-uri 'self'; form-action 'self'; upgrade-insecure-requests;
+  Permissions-Policy: camera=(), microphone=(), geolocation=()
+  Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com https://cdn.jsdelivr.net https://esm.sh; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdn.jsdelivr.net; font-src 'self' data: https://fonts.gstatic.com; connect-src 'self' https://app.tech4ag.my wss://app.tech4ag.my https://*.supabase.co wss://*.supabase.co https://esm.sh; img-src 'self' data: blob: https:; frame-ancestors 'none'; base-uri 'self'; form-action 'self';
+  Strict-Transport-Security: max-age=31536000; includeSubDomains; preload
+
+/index.html
+  Cache-Control: no-cache
+
+/assets/*
+  Cache-Control: public, max-age=31536000, immutable

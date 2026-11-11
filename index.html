@@ -22,6 +22,7 @@
   <link href="https://fonts.googleapis.com/css2?family=Oswald:wght@400;500;700&display=swap" rel="stylesheet">
 
   <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+  <script src="./config.js"></script>
 
   <link rel="stylesheet" href="./assets/css/style.css">
 </head>
@@ -335,7 +336,7 @@
     </section>
 
     <section id="tabAdminSearch" class="tabpane">
-      <div class="card toolbar" id="adminSearchFilterForm">
+      <div class="card toolbar" id="adminSearchToolbar">
         <div style="display:flex; justify-content:space-between; align-items:center; width: 100%;">
           <div>
             <div class="small" style="font-weight:600; font-size:1rem; color:var(--primary);">Carian Keseluruhan Tempahan (Admin)</div>
@@ -404,17 +405,13 @@
   </div>
 
   <script>
-    window.API_E_ROM_BASE = ""; 
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', () => {
-        navigator.serviceWorker.register('./sw.js')
-          .then(reg => console.log('SW berdaftar:', reg.scope))
-          .catch(err => console.log('SW gagal:', err));
+        navigator.serviceWorker.register('./sw.js').catch(() => {});
       });
     }
   </script>
 
-  <script type="module" src="./src/api/supabaseClient.js"></script>
   <script type="module" src="./assets/js/app.js"></script>
 </body>
 </html>
