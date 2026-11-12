@@ -8,8 +8,9 @@ import {
 import {
   exportDatabaseJSON,
   importDatabaseJSON,
-  abortMigrationOperations
-} from "../../migration.js";
+  abortMigrationOperations,
+  renderMigrationStatus
+} from "../../migration.js?v=20261112";
 
 const SHOW_PAST_DAYS = false;
 
@@ -121,12 +122,20 @@ function toastInfo(t) {
 
 function toastWarn(t) {
   const toast = getToast();
-  if (toast) toast.fire({ icon: 'warning', title: t });
+  if (toast) {
+    toast.fire({ icon: 'warning', title: t });
+  } else if (typeof window !== 'undefined' && typeof window.alert === 'function') {
+    window.alert(t);
+  }
 }
 
 function toastErr(t) {
   const toast = getToast();
-  if (toast) toast.fire({ icon: 'error', title: t });
+  if (toast) {
+    toast.fire({ icon: 'error', title: t });
+  } else if (typeof window !== 'undefined' && typeof window.alert === 'function') {
+    window.alert(t);
+  }
 }
 
 function modalLoading(title = 'Memproses...') {
@@ -486,15 +495,24 @@ function setupUI() {
 }
 
 async function handleAdminExportJson() {
+  const statusEl = $('migrationStatusArea');
+
   if (!state.user || state.user.role !== 'ADMIN') {
-    return toastErr('Akses ditolak. Hanya Pentadbir dibenarkan.');
+    const msg = 'Akses ditolak. Hanya Pentadbir dibenarkan.';
+    renderMigrationStatus(statusEl, { type: 'error', title: 'Akses Ditolak', message: msg });
+    return toastErr(msg);
   }
 
   const btnExportJson = $('btnExportJson');
   const btnImportJson = $('btnImportJson');
-  const statusEl = $('migrationStatusArea');
   if (btnExportJson) btnExportJson.disabled = true;
   if (btnImportJson) btnImportJson.disabled = true;
+
+  renderMigrationStatus(statusEl, {
+    type: 'info',
+    title: 'Memulakan Eksport Sandaran JSON...',
+    message: 'Sedang menghubungi pelayan pangkalan data, sila tunggu sebentar.'
+  });
 
   try {
     const result = await exportDatabaseJSON({
@@ -503,11 +521,15 @@ async function handleAdminExportJson() {
       sessionToken: getSessionToken()
     });
 
-    if (result.ok) {
-      toastOk('Fail sandaran JSON berjaya dimuat turun.');
+    if (result && result.ok) {
+      toastOk('Fail sandaran JSON berjaya dijana.');
     } else {
-      toastErr(result.error || 'Gagal menjana sandaran JSON.');
+      toastErr((result && result.error) || 'Gagal menjana sandaran JSON.');
     }
+  } catch (err) {
+    const msg = err && err.message ? err.message : 'Ralat tidak dijangka semasa mengeksport JSON.';
+    renderMigrationStatus(statusEl, { type: 'error', title: 'Eksport Sandaran Gagal', message: msg });
+    toastErr(msg);
   } finally {
     if (btnExportJson) btnExportJson.disabled = false;
     if (btnImportJson) btnImportJson.disabled = false;
@@ -515,18 +537,23 @@ async function handleAdminExportJson() {
 }
 
 async function handleAdminImportJson() {
+  const statusEl = $('migrationStatusArea');
+
   if (!state.user || state.user.role !== 'ADMIN') {
-    return toastErr('Akses ditolak. Hanya Pentadbir dibenarkan.');
+    const msg = 'Akses ditolak. Hanya Pentadbir dibenarkan.';
+    renderMigrationStatus(statusEl, { type: 'error', title: 'Akses Ditolak', message: msg });
+    return toastErr(msg);
   }
 
   const fileInput = $('importJsonFile');
   const btnExportJson = $('btnExportJson');
   const btnImportJson = $('btnImportJson');
-  const statusEl = $('migrationStatusArea');
   const file = fileInput && fileInput.files ? fileInput.files[0] : null;
 
   if (!file) {
-    return toastWarn('Sila pilih fail sandaran .json terlebih dahulu.');
+    const msg = 'Sila pilih fail sandaran .json terlebih dahulu.';
+    renderMigrationStatus(statusEl, { type: 'warning', title: 'Tiada Fail Dipilih', message: msg });
+    return toastWarn(msg);
   }
 
   const isConfirmed = await modalConfirm(
@@ -539,6 +566,12 @@ async function handleAdminImportJson() {
 
   if (btnExportJson) btnExportJson.disabled = true;
   if (btnImportJson) btnImportJson.disabled = true;
+
+  renderMigrationStatus(statusEl, {
+    type: 'info',
+    title: 'Memulakan Pemulihan Data JSON...',
+    message: 'Sedang mengesahkan fail dan menghantar transaksi ke pangkalan data.'
+  });
 
   try {
     const result = await importDatabaseJSON(file, {
@@ -556,11 +589,15 @@ async function handleAdminImportJson() {
       }
     });
 
-    if (result.ok) {
+    if (result && result.ok) {
       toastOk('Pemulihan data 1-to-1 selesai dan paparan telah disegarkan.');
     } else {
-      toastErr(result.error || 'Gagal mengimport fail JSON.');
+      toastErr((result && result.error) || 'Gagal mengimport fail JSON.');
     }
+  } catch (err) {
+    const msg = err && err.message ? err.message : 'Ralat tidak dijangka semasa mengimport JSON.';
+    renderMigrationStatus(statusEl, { type: 'error', title: 'Import / Pemulihan Gagal', message: msg });
+    toastErr(msg);
   } finally {
     if (btnExportJson) btnExportJson.disabled = false;
     if (btnImportJson) btnImportJson.disabled = false;

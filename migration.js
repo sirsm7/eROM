@@ -59,6 +59,7 @@ export const MIGRATION_TABLE_SCHEMAS = Object.freeze({
 let isExportInProgress = false;
 let isImportInProgress = false;
 let activeAbortController = null;
+let activeDownloadObjectUrl = null;
 
 function isPlainObject(value) {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
@@ -85,6 +86,15 @@ function throwIfAborted(signal) {
   }
 }
 
+function revokeActiveDownloadUrl() {
+  if (activeDownloadObjectUrl) {
+    try {
+      URL.revokeObjectURL(activeDownloadObjectUrl);
+    } catch {}
+    activeDownloadObjectUrl = null;
+  }
+}
+
 export function isMigrationBusy() {
   return isExportInProgress || isImportInProgress;
 }
@@ -94,6 +104,7 @@ export function abortMigrationOperations() {
     activeAbortController.abort();
     activeAbortController = null;
   }
+  revokeActiveDownloadUrl();
 }
 
 export function renderMigrationStatus(container, statusData) {
@@ -158,6 +169,30 @@ export function renderMigrationStatus(container, statusData) {
       listEl.appendChild(li);
     }
     wrapper.appendChild(listEl);
+  }
+
+  if (statusData.downloadAction && statusData.downloadAction.url && statusData.downloadAction.filename) {
+    const actionWrap = document.createElement('div');
+    actionWrap.style.marginTop = '10px';
+
+    const linkEl = document.createElement('a');
+    linkEl.setAttribute('href', statusData.downloadAction.url);
+    linkEl.setAttribute('download', statusData.downloadAction.filename);
+    linkEl.setAttribute('rel', 'noopener');
+    linkEl.textContent = statusData.downloadAction.label || `Muat Turun Manual (${statusData.downloadAction.filename})`;
+    linkEl.style.display = 'inline-flex';
+    linkEl.style.alignItems = 'center';
+    linkEl.style.justifyContent = 'center';
+    linkEl.style.minHeight = '44px';
+    linkEl.style.padding = '8px 14px';
+    linkEl.style.borderRadius = '8px';
+    linkEl.style.background = '#065f46';
+    linkEl.style.color = '#ffffff';
+    linkEl.style.fontWeight = '600';
+    linkEl.style.textDecoration = 'none';
+
+    actionWrap.appendChild(linkEl);
+    wrapper.appendChild(actionWrap);
   }
 
   fragment.appendChild(wrapper);
@@ -307,18 +342,22 @@ export function validateMigrationPayload(payload) {
 }
 
 function triggerJsonDownload(jsonContent, filename) {
-  const blob = new Blob([jsonContent], { type: 'application/json' });
+  revokeActiveDownloadUrl();
+
+  const blob = new Blob([jsonContent], { type: 'application/json;charset=utf-8' });
   const objectUrl = URL.createObjectURL(blob);
+  activeDownloadObjectUrl = objectUrl;
+
   const anchor = document.createElement('a');
   anchor.href = objectUrl;
   anchor.download = filename;
+  anchor.rel = 'noopener';
   anchor.style.display = 'none';
   document.body.appendChild(anchor);
   anchor.click();
   document.body.removeChild(anchor);
-  setTimeout(() => {
-    URL.revokeObjectURL(objectUrl);
-  }, 1000);
+
+  return objectUrl;
 }
 
 export async function exportDatabaseJSON(options = {}) {
@@ -355,16 +394,10 @@ export async function exportDatabaseJSON(options = {}) {
     const client = await getSupabaseClient();
     throwIfAborted(controller.signal);
 
-    let rpcQuery = client.rpc('fn_admin_export_database_v2', {
+    const { data: rpcResponse, error: rpcError } = await client.rpc('fn_admin_export_database_v2', {
       p_admin_email: adminEmail,
       p_session_token: sessionToken
     });
-
-    if (controller.signal && typeof rpcQuery.abortSignal === 'function') {
-      rpcQuery = rpcQuery.abortSignal(controller.signal);
-    }
-
-    const { data: rpcResponse, error: rpcError } = await rpcQuery;
     throwIfAborted(controller.signal);
 
     if (rpcError) {
@@ -409,13 +442,18 @@ export async function exportDatabaseJSON(options = {}) {
     const filename = `erom-ag-backup-${safeTimestamp}.json`;
     const serialized = JSON.stringify(payload, null, 2);
 
-    triggerJsonDownload(serialized, filename);
+    const downloadUrl = triggerJsonDownload(serialized, filename);
 
     renderMigrationStatus(statusEl, {
       type: 'success',
       title: 'Eksport Sandaran JSON Berjaya',
-      message: `Fail "${filename}" telah dimuat turun.`,
-      details: summaryDetails
+      message: `Fail "${filename}" telah dijana. Jika muat turun automatik tidak bermula, gunakan pautan manual di bawah.`,
+      details: summaryDetails,
+      downloadAction: {
+        url: downloadUrl,
+        filename,
+        label: `Muat Turun Fail Sandaran (${filename})`
+      }
     });
 
     return { ok: true, filename, payload };
@@ -510,17 +548,11 @@ export async function importDatabaseJSON(file, options = {}) {
       message: 'Melaksanakan transaksi upsert atomik melalui RPC pentadbir mengikut urutan kunci asing.'
     });
 
-    let rpcQuery = client.rpc('fn_admin_import_database_v2', {
+    const { data: rpcResponse, error: rpcError } = await client.rpc('fn_admin_import_database_v2', {
       p_admin_email: adminEmail,
       p_session_token: sessionToken,
       p_tables: validatedData.tables
     });
-
-    if (controller.signal && typeof rpcQuery.abortSignal === 'function') {
-      rpcQuery = rpcQuery.abortSignal(controller.signal);
-    }
-
-    const { data: rpcResponse, error: rpcError } = await rpcQuery;
     throwIfAborted(controller.signal);
 
     if (rpcError) {

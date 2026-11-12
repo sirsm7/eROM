@@ -1,14 +1,14 @@
-const CACHE_NAME = 'erom-ag-v14';
+const CACHE_NAME = 'erom-ag-v15';
 const ASSETS_TO_CACHE = [
   './',
   './index.html',
-  './assets/css/style.css',
-  './assets/js/app.js',
+  './assets/css/style.css?v=20261112',
+  './assets/js/app.js?v=20261112',
   './assets/img/logo-kpm.png',
-  './config.js',
+  './config.js?v=20261112',
   './idb-cache.js',
   './realtime.js',
-  './migration.js',
+  './migration.js?v=20261112',
   './manifest.json'
 ];
 
@@ -16,7 +16,17 @@ self.addEventListener('install', (event) => {
   self.skipWaiting();
   event.waitUntil(
     caches.open(CACHE_NAME).then((cache) => {
-      return cache.addAll(ASSETS_TO_CACHE);
+      return Promise.all(
+        ASSETS_TO_CACHE.map((assetUrl) => {
+          const freshRequest = new Request(assetUrl, { cache: 'reload' });
+          return fetch(freshRequest).then((response) => {
+            if (!response || response.status !== 200) {
+              throw new Error(`Failed to precache asset: ${assetUrl}`);
+            }
+            return cache.put(assetUrl, response);
+          });
+        })
+      );
     })
   );
 });
