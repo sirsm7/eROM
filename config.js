@@ -8,11 +8,19 @@ window.ENV_READY = (async function initializeConfig() {
       cache: 'no-store'
     });
 
-    if (!response.ok) {
-      throw new Error(`HTTP error fetching config: ${response.status}`);
+    let data = null;
+    try {
+      data = await response.json();
+    } catch {
+      data = null;
     }
 
-    const data = await response.json();
+    if (!response.ok) {
+      const serverMessage = data && typeof data.error === 'string' && data.error.trim()
+        ? data.error.trim()
+        : `HTTP error fetching config: ${response.status}`;
+      throw new Error(serverMessage);
+    }
 
     if (!data || typeof data !== 'object') {
       throw new Error('Invalid configuration payload received.');
@@ -23,6 +31,10 @@ window.ENV_READY = (async function initializeConfig() {
       SUPABASE_ANON_KEY: String(data.SUPABASE_ANON_KEY || '').trim(),
       GAS_ENDPOINT_URL: String(data.GAS_ENDPOINT_URL || '').trim()
     };
+
+    if (!resolvedConfig.SUPABASE_URL || !resolvedConfig.SUPABASE_ANON_KEY) {
+      throw new Error('Missing required SUPABASE_URL or SUPABASE_ANON_KEY configuration.');
+    }
 
     window.__ENV = Object.freeze(resolvedConfig);
     return window.__ENV;

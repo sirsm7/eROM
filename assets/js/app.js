@@ -5,12 +5,16 @@ import {
   deleteCacheByPrefix,
   clearExpiredCache
 } from "../../idb-cache.js";
+import {
+  exportDatabaseJSON,
+  importDatabaseJSON
+} from "../../migration.js";
 
 const SHOW_PAST_DAYS = false;
 
 const ROOM_OPTIONS = [
-  "PKG Melekek - Bilik Kuliah (25 orang)",      
-  "PKG Melekek - Bilik Mesyuarat (25 orang)",   
+  "PKG Melekek - Bilik Kuliah (25 orang)",
+  "PKG Melekek - Bilik Mesyuarat (25 orang)",
   "PKG Masjid Tanah - Bilik Seri Cempaka (24 orang)",
   "PKG Masjid Tanah - Bilik Seri Melur (18 orang)",
   "PKG Masjid Tanah - Bilik Pendidikan Digital (12 orang)",
@@ -31,8 +35,20 @@ const pad2 = n => String(n).padStart(2, '0');
 const formatMonthLabel = (y, m) => new Intl.DateTimeFormat('ms-MY', { month: 'long', year: 'numeric' }).format(new Date(y, m - 1, 1));
 const toYMD = d => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
 const firstDay = (y, m) => `${y}-${pad2(m)}-01`;
-const lastDay = (y, m) => toYMD(new Date(Date.UTC(y, m, 0)));
+const lastDay = (y, m) => toYMD(new Date(y, m, 0));
 const todayYMD = () => toYMD(new Date());
+
+function parseLocalYMD(ymd) {
+  const parts = String(ymd || '').split('-').map(Number);
+  if (parts.length !== 3 || parts.some(Number.isNaN)) {
+    return new Date();
+  }
+  return new Date(parts[0], parts[1] - 1, parts[2]);
+}
+
+function getLocalDayOfWeek(ymd) {
+  return parseLocalYMD(ymd).getDay();
+}
 
 function toHHMM(x) {
   if (x == null) return "";
@@ -52,9 +68,27 @@ function toYMDNorm(x) {
   return s.slice(0, 10);
 }
 
-const toMinutes = t => { if (!t) return 0; const [h, m] = toHHMM(t).split(':').map(Number); return (h * 60) + (m || 0); };
-function escapeHtml(s) { return String(s ?? '').replace(/[&<>"']/g, m => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[m])); }
-function addDaysYMD(ymd, n) { const [y, m, d] = ymd.split('-').map(Number); const dt = new Date(y, m - 1, d); dt.setDate(dt.getDate() + n); return toYMD(dt); }
+const toMinutes = t => {
+  if (!t) return 0;
+  const [h, m] = toHHMM(t).split(':').map(Number);
+  return (h * 60) + (m || 0);
+};
+
+function escapeHtml(s) {
+  return String(s ?? '').replace(/[&<>"']/g, m => ({
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    '"': '&quot;',
+    "'": '&#39;'
+  }[m]));
+}
+
+function addDaysYMD(ymd, n) {
+  const dt = parseLocalYMD(ymd);
+  dt.setDate(dt.getDate() + n);
+  return toYMD(dt);
+}
 
 function isSwalAvailable() {
   return typeof Swal !== 'undefined' && Swal !== null && typeof Swal.fire === 'function';
@@ -127,6 +161,13 @@ function createEl(tag, cls) {
   return e;
 }
 
+function clearElementChildren(el) {
+  if (!el) return;
+  while (el.firstChild) {
+    el.removeChild(el.firstChild);
+  }
+}
+
 async function modalConfirm(title, text, confirmText = 'Ya, Teruskan') {
   if (isSwalAvailable()) {
     const result = await Swal.fire({
@@ -187,19 +228,29 @@ let adminState = {
 };
 
 let supaClient = null;
+let adminSearchAbortController = null;
+let adminBookingListAbortController = null;
+let adminUserListAbortController = null;
 
 window.addEventListener('load', bootstrap);
 
 async function bootstrap() {
   setupUI();
-  
+
   if (window.ENV_READY) {
-    await window.ENV_READY;
+    try {
+      await window.ENV_READY;
+    } catch {
+      if (isSwalAvailable()) {
+        Swal.fire('Ralat Konfigurasi', 'Konfigurasi pelayan tidak lengkap. Sila hubungi pentadbir sistem.', 'error');
+      }
+      return;
+    }
   }
-  
+
   try {
     supaClient = await getSupabaseClient();
-  } catch (err) {
+  } catch {
     if (isSwalAvailable()) {
       Swal.fire('Ralat Permulaan', 'Gagal menyambung ke pangkalan data. Sila muat semula halaman.', 'error');
     }
@@ -233,26 +284,40 @@ async function bootstrap() {
   await loadOverview(true);
 }
 
-function setupRealtimeSubscription() {
-  if (!supaClient) return;
-  subscribeBookingsRealtime(supaClient, async (payload) => {
-    await handleRealtimePayload(payload);
-  });
-}
-
-async function handleRealtimePayload(payload) {
+async function syncAllActiveViews() {
   await clearActiveCaches();
 
   if (state.room) {
-    refreshCalendar(false);
+    await refreshCalendar(false);
   }
-  loadOverview(false);
+  await loadOverview(false);
   if (state.user) {
-    loadMyBookings(false);
+    await loadMyBookings(false);
   }
   if ($('tabAdminSearch') && $('tabAdminSearch').classList.contains('active')) {
-    executeAdminSearch();
+    const startVal = $('adminSearchStartDate') ? $('adminSearchStartDate').value : '';
+    const endVal = $('adminSearchEndDate') ? $('adminSearchEndDate').value : '';
+    if (startVal && endVal) {
+      await executeAdminSearch();
+    }
   }
+}
+
+function setupRealtimeSubscription() {
+  if (!supaClient) return;
+  subscribeBookingsRealtime(
+    supaClient,
+    async (payload) => {
+      await handleRealtimePayload(payload);
+    },
+    async () => {
+      await syncAllActiveViews();
+    }
+  );
+}
+
+async function handleRealtimePayload(payload) {
+  await syncAllActiveViews();
 
   const rec = payload.new || payload.old;
   if (!rec) return;
@@ -268,7 +333,7 @@ async function handleRealtimePayload(payload) {
         toastInfo(`Jadual tempahan dikemaskini: ${escapeHtml(rec.bilik) || 'Bilik'}`);
       }
     } else if (payload.eventType === 'DELETE') {
-      toastInfo(`Rekod tempahan dikeluarkan.`);
+      toastInfo('Rekod tempahan dikeluarkan.');
     }
   }
 }
@@ -393,6 +458,16 @@ function setupUI() {
   const btnBulkCancel = $('btnBulkCancel');
   if (btnBulkCancel) btnBulkCancel.addEventListener('click', executeBulkCancel);
 
+  const btnExportJson = $('btnExportJson');
+  if (btnExportJson) {
+    btnExportJson.addEventListener('click', handleAdminExportJson);
+  }
+
+  const btnImportJson = $('btnImportJson');
+  if (btnImportJson) {
+    btnImportJson.addEventListener('click', handleAdminImportJson);
+  }
+
   const btnAdminExecuteSearch = $('btnAdminExecuteSearch');
   if (btnAdminExecuteSearch) btnAdminExecuteSearch.addEventListener('click', executeAdminSearch);
 
@@ -409,6 +484,80 @@ function setupUI() {
   }
 }
 
+async function handleAdminExportJson() {
+  if (!state.user || state.user.role !== 'ADMIN') {
+    return toastErr('Akses ditolak. Hanya Pentadbir dibenarkan.');
+  }
+
+  const btnExportJson = $('btnExportJson');
+  const statusEl = $('migrationStatusArea');
+  if (btnExportJson) btnExportJson.disabled = true;
+
+  try {
+    const result = await exportDatabaseJSON({
+      statusEl,
+      adminEmail: state.user.email,
+      sessionToken: getSessionToken()
+    });
+
+    if (result.ok) {
+      toastOk('Fail sandaran JSON berjaya dimuat turun.');
+    } else {
+      toastErr(result.error || 'Gagal menjana sandaran JSON.');
+    }
+  } finally {
+    if (btnExportJson) btnExportJson.disabled = false;
+  }
+}
+
+async function handleAdminImportJson() {
+  if (!state.user || state.user.role !== 'ADMIN') {
+    return toastErr('Akses ditolak. Hanya Pentadbir dibenarkan.');
+  }
+
+  const fileInput = $('importJsonFile');
+  const btnImportJson = $('btnImportJson');
+  const statusEl = $('migrationStatusArea');
+  const file = fileInput && fileInput.files ? fileInput.files[0] : null;
+
+  if (!file) {
+    return toastWarn('Sila pilih fail sandaran .json terlebih dahulu.');
+  }
+
+  const isConfirmed = await modalConfirm(
+    'Pulihkan Data 1-to-1 JSON?',
+    'Rekod sedia ada dengan kunci utama yang sama akan dikemaskini dan rekod baharu akan ditambah mengikut susunan jadual sistem. Teruskan?',
+    'Ya, Pulihkan Data'
+  );
+
+  if (!isConfirmed) return;
+
+  if (btnImportJson) btnImportJson.disabled = true;
+
+  try {
+    const result = await importDatabaseJSON(file, {
+      statusEl,
+      onComplete: async () => {
+        if (fileInput) fileInput.value = '';
+        await syncAllActiveViews();
+        await loadAdminUserList();
+        const adminRoom = $('adminRoom');
+        if (adminRoom && adminRoom.value) {
+          await loadAdminBookingList();
+        }
+      }
+    });
+
+    if (result.ok) {
+      toastOk('Pemulihan data 1-to-1 selesai dan paparan telah disegarkan.');
+    } else {
+      toastErr(result.error || 'Gagal mengimport fail JSON.');
+    }
+  } finally {
+    if (btnImportJson) btnImportJson.disabled = false;
+  }
+}
+
 function resetUI() {
   const now = new Date();
   state.year = now.getFullYear();
@@ -417,10 +566,7 @@ function resetUI() {
   if (monthLabel) monthLabel.textContent = formatMonthLabel(state.year, state.month);
 
   state.days = [];
-  const grid = $('grid');
-  if (grid) {
-    while (grid.firstChild) grid.removeChild(grid.firstChild);
-  }
+  clearElementChildren($('grid'));
   document.querySelectorAll('.tile.sel').forEach(el => el.classList.remove('sel'));
 
   const roomSelect = $('roomSelect');
@@ -432,12 +578,7 @@ function resetUI() {
 
   const adminRoom = $('adminRoom');
   if (adminRoom) adminRoom.value = '';
-  const adminList = $('adminList');
-  if (adminList) {
-    while (adminList.firstChild) {
-      adminList.removeChild(adminList.firstChild);
-    }
-  }
+  clearElementChildren($('adminList'));
   adminState.bookings = [];
 
   if (!state.user || state.user.role !== 'ADMIN') {
@@ -485,25 +626,12 @@ function resetBookingForm(clearFields) {
       const el = $(id);
       if (el) el.value = '';
     });
-    
+
     const sek = $('sektor');
-    if (sek) {
-      while (sek.firstChild) {
-        sek.removeChild(sek.firstChild);
-      }
-    }
-    
+    clearElementChildren(sek);
+
     const nama = $('nama');
-    if (nama) {
-      while (nama.firstChild) {
-        nama.removeChild(nama.firstChild);
-      }
-      const opt = document.createElement('option');
-      opt.value = '';
-      opt.textContent = '— Sila pilih sektor dahulu —';
-      nama.appendChild(opt);
-      nama.disabled = true;
-    }
+    clearElementChildren(nama);
 
     if (state.user && sek && nama) {
       const optSek = document.createElement('option');
@@ -511,15 +639,20 @@ function resetBookingForm(clearFields) {
       optSek.textContent = state.user.sektor;
       sek.appendChild(optSek);
       sek.value = state.user.sektor;
+      sek.disabled = false;
 
-      while (nama.firstChild) {
-        nama.removeChild(nama.firstChild);
-      }
       const optNama = document.createElement('option');
       optNama.value = state.user.nama;
       optNama.textContent = state.user.nama;
       nama.appendChild(optNama);
       nama.value = state.user.nama;
+      nama.disabled = false;
+    } else if (nama) {
+      const opt = document.createElement('option');
+      opt.value = '';
+      opt.textContent = '— Sila pilih sektor dahulu —';
+      nama.appendChild(opt);
+      nama.disabled = true;
     }
   }
   state.selectedDate = null;
@@ -528,9 +661,17 @@ function resetBookingForm(clearFields) {
 }
 
 function changeMonth(obj, delta, refreshCal) {
-  let m = obj.month + delta, y = obj.year;
-  if (m < 1) { m = 12; y--; } else if (m > 12) { m = 1; y++; }
-  obj.month = m; obj.year = y;
+  let m = obj.month + delta;
+  let y = obj.year;
+  if (m < 1) {
+    m = 12;
+    y--;
+  } else if (m > 12) {
+    m = 1;
+    y++;
+  }
+  obj.month = m;
+  obj.year = y;
 
   if (obj === state) {
     const monthLabel = $('monthLabel');
@@ -546,8 +687,11 @@ function changeMonth(obj, delta, refreshCal) {
 }
 
 function switchTab(name) {
-  document.querySelectorAll('.tabbtn').forEach(b => b.classList.toggle('active', b.id === `tab${name.charAt(0).toUpperCase() + name.slice(1)}Btn`));
-  document.querySelectorAll('.tabpane').forEach(p => p.classList.toggle('active', p.id === `tab${name.charAt(0).toUpperCase() + name.slice(1)}`));
+  const targetBtnId = `tab${name.charAt(0).toUpperCase() + name.slice(1)}Btn`;
+  const targetPaneId = `tab${name.charAt(0).toUpperCase() + name.slice(1)}`;
+
+  document.querySelectorAll('.tabbtn').forEach(b => b.classList.toggle('active', b.id === targetBtnId));
+  document.querySelectorAll('.tabpane').forEach(p => p.classList.toggle('active', p.id === targetPaneId));
 
   if (name === 'admin' || name === 'adminSearch') {
     if (state.user && state.user.role === 'ADMIN') {
@@ -647,7 +791,7 @@ async function showLoginModal() {
     localStorage.setItem('erom_user', JSON.stringify(state.user));
     localStorage.setItem('erom_session_token', state.sessionToken);
     if (state.sessionExpiresAt) localStorage.setItem('erom_session_expires_at', state.sessionExpiresAt);
-    
+
     onLoginSuccess();
     toastOk(`Selamat datang, ${escapeHtml(state.user.nama)}`);
   }
@@ -697,10 +841,7 @@ function onLoginSuccess() {
   loadMyBookings(false);
 
   if (ov.view === 'table') {
-    const tbody = $('ovTableBody');
-    if (tbody) {
-      while (tbody.firstChild) tbody.removeChild(tbody.firstChild);
-    }
+    clearElementChildren($('ovTableBody'));
     renderOvTable();
   }
 }
@@ -713,7 +854,7 @@ async function onLogout() {
       await supaClient.rpc('fn_logout_secure', { p_session_token: currentSessionToken });
     } catch {}
   }
-  
+
   teardownRealtime(supaClient);
   deleteCacheByPrefix('my_').catch(() => {});
 
@@ -763,18 +904,13 @@ async function onLogout() {
   }
 
   if (ov.view === 'table') {
-    const tbody = $('ovTableBody');
-    if (tbody) {
-      while (tbody.firstChild) tbody.removeChild(tbody.firstChild);
-    }
+    clearElementChildren($('ovTableBody'));
     renderOvTable();
   }
 
   const myBookingsTbody = $('myBookingsTableBody');
   if (myBookingsTbody) {
-    while (myBookingsTbody.firstChild) {
-      myBookingsTbody.removeChild(myBookingsTbody.firstChild);
-    }
+    clearElementChildren(myBookingsTbody);
     const tr = document.createElement('tr');
     const td = document.createElement('td');
     td.colSpan = 5;
@@ -783,6 +919,10 @@ async function onLogout() {
     td.textContent = 'Sila log masuk untuk melihat rekod.';
     tr.appendChild(td);
     myBookingsTbody.appendChild(tr);
+  }
+
+  if (supaClient) {
+    setupRealtimeSubscription();
   }
 
   toastInfo('Log keluar berjaya');
@@ -842,7 +982,7 @@ async function changeOwnPassword() {
 
 function toggleBookingForm(enable) {
   const fields = document.querySelectorAll('#bookingFormContainer input, #bookingFormContainer select, #bookingFormContainer button');
-  fields.forEach(f => f.disabled = !enable);
+  fields.forEach(f => { f.disabled = !enable; });
 
   const loginWarning = $('loginWarning');
   if (loginWarning) loginWarning.style.display = enable ? 'none' : 'block';
@@ -938,7 +1078,6 @@ async function onBook() {
     } else {
       if (isSwalAvailable()) Swal.fire('Gagal', res.data?.error || 'Ralat tidak diketahui', 'error');
     }
-
   } catch (e) {
     modalClose();
     if (isSwalAvailable()) Swal.fire('Ralat Rangkaian', e.message, 'error');
@@ -964,10 +1103,7 @@ function onRoomSelectChange(e) {
     if (noRoomHint) noRoomHint.style.display = 'none';
     refreshCalendar(true);
   } else {
-    const grid = $('grid');
-    if (grid) {
-      while (grid.firstChild) grid.removeChild(grid.firstChild);
-    }
+    clearElementChildren($('grid'));
     if (noRoomHint) noRoomHint.style.display = 'block';
   }
 }
@@ -1064,7 +1200,7 @@ function processBookingsForCalendar(bookings) {
 function renderCalendar() {
   const grid = $('grid');
   if (!grid) return;
-  while (grid.firstChild) grid.removeChild(grid.firstChild);
+  clearElementChildren(grid);
 
   const daysToShow = SHOW_PAST_DAYS ? state.days : state.days.filter(d => !d.isPast);
 
@@ -1079,11 +1215,10 @@ function renderCalendar() {
 
   const docFrag = document.createDocumentFragment();
   const first = daysToShow[0];
-  const weekday = (new Date(first.date).getDay() + 6) % 7;
+  const weekday = (getLocalDayOfWeek(first.date) + 6) % 7;
 
   for (let i = 0; i < weekday; i++) {
-    const x = createEl('div', 'blank');
-    docFrag.appendChild(x);
+    docFrag.appendChild(createEl('div', 'blank'));
   }
 
   daysToShow.forEach(day => {
@@ -1094,7 +1229,8 @@ function renderCalendar() {
 }
 
 function buildTile(day) {
-  const isWeekend = (new Date(day.date).getDay() === 0 || new Date(day.date).getDay() === 6);
+  const dow = getLocalDayOfWeek(day.date);
+  const isWeekend = (dow === 0 || dow === 6);
   const tile = createEl('div', `tile ${day.isPast || isWeekend ? 'disabled' : ''}`);
   tile.dataset.date = day.date;
 
@@ -1102,7 +1238,7 @@ function buildTile(day) {
   top.textContent = Number(day.date.slice(8, 10));
 
   if (!day.isPast && !isWeekend) {
-    const statusMap = { 'red': 'PENUH', 'orange': 'SEPARA PENUH', 'green': 'TIADA TEMPAHAN' };
+    const statusMap = { red: 'PENUH', orange: 'SEPARA PENUH', green: 'TIADA TEMPAHAN' };
     const badge = createEl('span', `badge ${day.status}`);
     badge.textContent = statusMap[day.status] || '';
     top.appendChild(badge);
@@ -1184,27 +1320,27 @@ function onGridClick(e) {
 
   if (dayData && dayData.bookings && dayData.bookings.length > 0) {
     const listWrapper = document.createElement('div');
-    listWrapper.style.cssText = "text-align:left; font-size:0.9rem; margin-top:10px;";
-    
+    listWrapper.style.cssText = 'text-align:left; font-size:0.9rem; margin-top:10px;';
+
     const ul = document.createElement('ul');
-    ul.style.cssText = "padding-left: 20px; margin-bottom: 0;";
+    ul.style.cssText = 'padding-left: 20px; margin-bottom: 0;';
 
     dayData.bookings.forEach(b => {
       const li = document.createElement('li');
-      li.style.cssText = "margin-bottom:10px; border-bottom:1px dashed #ccc; padding-bottom:10px;";
-      
+      li.style.cssText = 'margin-bottom:10px; border-bottom:1px dashed #ccc; padding-bottom:10px;';
+
       const pMasa = document.createElement('div');
       const strongMasa = document.createElement('strong');
       strongMasa.textContent = 'Masa: ';
       pMasa.appendChild(strongMasa);
       pMasa.appendChild(document.createTextNode(`${toHHMM(b.masa_mula)} - ${toHHMM(b.masa_tamat)}`));
-      
+
       const pPenempah = document.createElement('div');
       const strongPenempah = document.createElement('strong');
       strongPenempah.textContent = 'Penempah: ';
       pPenempah.appendChild(strongPenempah);
       pPenempah.appendChild(document.createTextNode(`${b.nama_penempah} (${b.sektor})`));
-      
+
       const pTujuan = document.createElement('div');
       const strongTujuan = document.createElement('strong');
       strongTujuan.textContent = 'Tujuan: ';
@@ -1221,7 +1357,7 @@ function onGridClick(e) {
 
     if (isSwalAvailable()) {
       Swal.fire({
-        title: `Senarai Tempahan (${date})`,
+        title: `Senarai Tempahan (${escapeHtml(date)})`,
         html: listWrapper.outerHTML,
         icon: 'info',
         confirmButtonText: 'Tutup',
@@ -1318,16 +1454,24 @@ function onRangeChange() {
 
 function updateRangeCounter() {
   if (!state.rangeMode) return;
-  const d1 = state.range.from, d2 = state.range.to;
+  const d1 = state.range.from;
+  const d2 = state.range.to;
   const rangeCounter = $('rangeCounter');
   if (!rangeCounter) return;
 
-  if (!d1 && !d2) { rangeCounter.textContent = 'Pilih julat tarikh...'; return; }
-  if (d1 && !d2) { rangeCounter.textContent = 'Sila pilih tarikh akhir...'; return; }
+  if (!d1 && !d2) {
+    rangeCounter.textContent = 'Pilih julat tarikh...';
+    return;
+  }
+  if (d1 && !d2) {
+    rangeCounter.textContent = 'Sila pilih tarikh akhir...';
+    return;
+  }
 
-  let count = 0, curr = d1;
+  let count = 0;
+  let curr = d1;
   while (curr <= d2) {
-    const day = new Date(curr).getDay();
+    const day = getLocalDayOfWeek(curr);
     if (day !== 0 && day !== 6) count++;
     curr = addDaysYMD(curr, 1);
   }
@@ -1387,8 +1531,8 @@ function populateUserFilter() {
   const filterEl = $('ovUserFilter');
   if (!filterEl) return;
 
-  while (filterEl.firstChild) filterEl.removeChild(filterEl.firstChild);
-  
+  clearElementChildren(filterEl);
+
   const defaultOpt = document.createElement('option');
   defaultOpt.value = '';
   defaultOpt.textContent = '— Semua Penempah —';
@@ -1428,7 +1572,9 @@ function processOverviewData(bookings) {
   bookings.forEach(b => {
     const ymd = toYMDNorm(b.tarikh);
     const key = `${ymd}|${b.bilik}`;
-    if (!perRoomPerDay.has(key)) { perRoomPerDay.set(key, { count: 0, totalMin: 0 }); }
+    if (!perRoomPerDay.has(key)) {
+      perRoomPerDay.set(key, { count: 0, totalMin: 0 });
+    }
     const curr = perRoomPerDay.get(key);
     curr.count += 1;
     curr.totalMin += (toMinutes(b.masa_tamat) - toMinutes(b.masa_mula));
@@ -1441,7 +1587,8 @@ function processOverviewData(bookings) {
       const isFull = (val.totalMin >= 360 || val.count >= 6);
       const status = isFull ? 'red' : 'orange';
       dayData.rooms.push({ room: roomName, status: status });
-      if (isFull) dayData.counts.red++; else dayData.counts.orange++;
+      if (isFull) dayData.counts.red++;
+      else dayData.counts.orange++;
     }
   });
 
@@ -1468,8 +1615,8 @@ function switchOverviewView(view) {
 function renderOvTable() {
   const tbody = $('ovTableBody');
   if (!tbody) return;
-  
-  while (tbody.firstChild) tbody.removeChild(tbody.firstChild);
+
+  clearElementChildren(tbody);
 
   let list = ov.bookings;
   const today = todayYMD();
@@ -1483,7 +1630,7 @@ function renderOvTable() {
     const tr = document.createElement('tr');
     const td = document.createElement('td');
     td.colSpan = 6;
-    td.style.cssText = "text-align:center;padding:15px";
+    td.style.cssText = 'text-align:center;padding:15px';
     td.textContent = 'Tiada tempahan semasa atau akan datang.';
     tr.appendChild(td);
     tbody.appendChild(tr);
@@ -1532,30 +1679,32 @@ function renderOvTable() {
 
     if (canAction) {
       const divWrap = document.createElement('div');
-      divWrap.style.cssText = "display:flex; gap:8px; justify-content:center;";
-      
+      divWrap.style.cssText = 'display:flex; gap:8px; justify-content:center;';
+
       const btnEdit = document.createElement('button');
+      btnEdit.type = 'button';
       btnEdit.className = 'btn-icon-edit-user';
       btnEdit.dataset.id = b.booking_id;
       btnEdit.title = 'Kemaskini Tempahan';
       btnEdit.textContent = '✏️';
-      btnEdit.style.cssText = "background:none; border:none; cursor:pointer; font-size:1.1rem;";
+      btnEdit.style.cssText = 'background:none; border:none; cursor:pointer; font-size:1.1rem; min-height:36px;';
       btnEdit.addEventListener('click', () => openUserEditModal(btnEdit.dataset.id));
       divWrap.appendChild(btnEdit);
 
       const btnDel = document.createElement('button');
+      btnDel.type = 'button';
       btnDel.className = 'btn-icon-del';
       btnDel.dataset.id = b.booking_id;
       btnDel.title = 'Batal Tempahan';
       btnDel.textContent = '🗑️';
-      btnDel.style.cssText = "background:none; border:none; cursor:pointer; font-size:1.1rem;";
+      btnDel.style.cssText = 'background:none; border:none; cursor:pointer; font-size:1.1rem; min-height:36px;';
       btnDel.addEventListener('click', () => cancelBooking(btnDel.dataset.id));
       divWrap.appendChild(btnDel);
 
       tdAction.appendChild(divWrap);
     } else {
       const spanPlaceholder = document.createElement('span');
-      spanPlaceholder.style.cssText = "color:#ccc; font-size:0.8rem;";
+      spanPlaceholder.style.cssText = 'color:#ccc; font-size:0.8rem;';
       spanPlaceholder.textContent = '-';
       tdAction.appendChild(spanPlaceholder);
     }
@@ -1570,8 +1719,8 @@ function renderOvTable() {
 function renderOvCalendar() {
   const grid = $('ovGrid');
   if (!grid) return;
-  
-  while (grid.firstChild) grid.removeChild(grid.firstChild);
+
+  clearElementChildren(grid);
 
   const lastDayOfMonth = new Date(ov.year, ov.month, 0).getDate();
   const firstDow = (new Date(ov.year, ov.month - 1, 1).getDay() + 6) % 7;
@@ -1624,7 +1773,7 @@ function renderOvCalendar() {
     tile.appendChild(body);
     docFrag.appendChild(tile);
   }
-  
+
   grid.appendChild(docFrag);
   renderOvSummary();
 }
@@ -1632,8 +1781,8 @@ function renderOvCalendar() {
 function renderOvSummary() {
   const list = $('ovSummaryList');
   if (!list) return;
-  while (list.firstChild) list.removeChild(list.firstChild);
-  
+  clearElementChildren(list);
+
   const counter = new Map();
   ov.bookings.forEach(b => {
     counter.set(b.bilik, (counter.get(b.bilik) || 0) + 1);
@@ -1648,9 +1797,9 @@ function renderOvSummary() {
     .map(room => [room, counter.get(room) || 0])
     .filter(x => x[1] > 0)
     .sort((a, b) => (b[1] - a[1]));
-    
+
   const docFrag = document.createDocumentFragment();
-  
+
   rows.forEach(([room, c], index) => {
     const wrapper = document.createElement('span');
     wrapper.appendChild(document.createTextNode(`• ${room} (`));
@@ -1659,12 +1808,12 @@ function renderOvSummary() {
     wrapper.appendChild(strong);
     wrapper.appendChild(document.createTextNode(' tempahan)'));
     docFrag.appendChild(wrapper);
-    
+
     if (index < rows.length - 1) {
       docFrag.appendChild(document.createElement('br'));
     }
   });
-  
+
   list.appendChild(docFrag);
   const ovSummaryWrap = $('ovSummaryWrap');
   if (ovSummaryWrap) ovSummaryWrap.style.display = 'block';
@@ -1702,19 +1851,16 @@ async function cancelBooking(id) {
   }
 }
 
-async function openUserEditModal(id) {
-  let b = ov.bookings.find(x => x.booking_id === id);
-  if (!b) b = state.myBookings.find(x => x.booking_id === id);
-
-  if (!b || !isSwalAvailable()) return;
+async function openUnifiedBookingEditModal(booking, titleText, recordId, onAfterUpdate) {
+  if (!booking || !isSwalAvailable()) return;
 
   const { value: form } = await Swal.fire({
-    title: 'Kemaskini Tempahan',
+    title: titleText,
     html: `
-      <label class="small">Tarikh</label><input id="eDate" type="date" class="swal2-input" value="${toYMDNorm(b.tarikh)}">
-      <label class="small">Masa Mula</label><input id="eStart" type="time" class="swal2-input" value="${toHHMM(b.masa_mula)}">
-      <label class="small">Masa Tamat</label><input id="eEnd" type="time" class="swal2-input" value="${toHHMM(b.masa_tamat)}">
-      <label class="small">Tujuan</label><input id="eNote" class="swal2-input" value="${escapeHtml(b.tujuan)}">
+      <label class="small">Tarikh</label><input id="eDate" type="date" class="swal2-input" value="${escapeHtml(toYMDNorm(booking.tarikh))}">
+      <label class="small">Masa Mula</label><input id="eStart" type="time" class="swal2-input" value="${escapeHtml(toHHMM(booking.masa_mula))}">
+      <label class="small">Masa Tamat</label><input id="eEnd" type="time" class="swal2-input" value="${escapeHtml(toHHMM(booking.masa_tamat))}">
+      <label class="small">Tujuan</label><input id="eNote" class="swal2-input" value="${escapeHtml(booking.tujuan)}">
     `,
     showCancelButton: true,
     confirmButtonText: 'Simpan',
@@ -1736,15 +1882,15 @@ async function openUserEditModal(id) {
 
     modalLoading('Menyimpan...');
     const { data } = await supaClient.rpc('fn_update_booking_secure_v2', {
-      p_booking_id: id,
+      p_booking_id: recordId,
       p_email: state.user.email,
       p_date: form.d,
       p_start: form.s,
       p_end: form.e,
-      p_category: b.kategori,
+      p_category: booking.kategori,
       p_note: form.n,
-      p_sektor: b.sektor,
-      p_nama: b.nama_penempah,
+      p_sektor: booking.sektor,
+      p_nama: booking.nama_penempah,
       p_session_token: getSessionToken()
     });
     modalClose();
@@ -1752,13 +1898,25 @@ async function openUserEditModal(id) {
     if (data && data.ok) {
       toastOk('Tempahan berjaya dikemaskini.');
       await clearActiveCaches();
-      loadOverview(false);
-      loadMyBookings(false);
-      if (state.room === b.bilik) refreshCalendar(false);
+      if (typeof onAfterUpdate === 'function') {
+        await onAfterUpdate();
+      }
     } else {
-      if (isSwalAvailable()) Swal.fire('Ralat', data?.error || 'Ralat tidak diketahui', 'error');
+      Swal.fire('Ralat', data?.error || 'Ralat tidak diketahui', 'error');
     }
   }
+}
+
+async function openUserEditModal(id) {
+  let b = ov.bookings.find(x => x.booking_id === id);
+  if (!b) b = state.myBookings.find(x => x.booking_id === id);
+  if (!b) return;
+
+  await openUnifiedBookingEditModal(b, 'Kemaskini Tempahan', id, async () => {
+    loadOverview(false);
+    loadMyBookings(false);
+    if (state.room === b.bilik) refreshCalendar(false);
+  });
 }
 
 async function loadMyBookings(showLoading) {
@@ -1809,13 +1967,13 @@ async function loadMyBookings(showLoading) {
 function renderMyBookingsTable() {
   const tbody = $('myBookingsTableBody');
   if (!tbody) return;
-  while (tbody.firstChild) tbody.removeChild(tbody.firstChild);
+  clearElementChildren(tbody);
 
   if (!state.myBookings || state.myBookings.length === 0) {
     const tr = document.createElement('tr');
     const td = document.createElement('td');
     td.colSpan = 5;
-    td.style.cssText = "text-align:center;padding:15px";
+    td.style.cssText = 'text-align:center;padding:15px';
     td.textContent = 'Tiada tempahan aktif atau akan datang.';
     tr.appendChild(td);
     tbody.appendChild(tr);
@@ -1846,31 +2004,33 @@ function renderMyBookingsTable() {
 
     const tdAction = document.createElement('td');
     tdAction.style.textAlign = 'center';
-    
+
     const divWrap = document.createElement('div');
-    divWrap.style.cssText = "display:flex; gap:8px; justify-content:center;";
+    divWrap.style.cssText = 'display:flex; gap:8px; justify-content:center;';
 
     const btnEdit = document.createElement('button');
+    btnEdit.type = 'button';
     btnEdit.className = 'btn-icon-edit-my';
     btnEdit.dataset.id = b.booking_id;
     btnEdit.title = 'Kemaskini';
     btnEdit.textContent = '✏️';
-    btnEdit.style.cssText = "background:none; border:none; cursor:pointer; font-size:1.1rem;";
+    btnEdit.style.cssText = 'background:none; border:none; cursor:pointer; font-size:1.1rem; min-height:36px;';
     btnEdit.addEventListener('click', () => openUserEditModal(btnEdit.dataset.id));
     divWrap.appendChild(btnEdit);
 
     const btnDel = document.createElement('button');
+    btnDel.type = 'button';
     btnDel.className = 'btn-icon-del-my';
     btnDel.dataset.id = b.booking_id;
     btnDel.title = 'Batal';
     btnDel.textContent = '🗑️';
-    btnDel.style.cssText = "background:none; border:none; cursor:pointer; font-size:1.1rem;";
+    btnDel.style.cssText = 'background:none; border:none; cursor:pointer; font-size:1.1rem; min-height:36px;';
     btnDel.addEventListener('click', () => cancelBooking(btnDel.dataset.id));
     divWrap.appendChild(btnDel);
 
     tdAction.appendChild(divWrap);
     tr.appendChild(tdAction);
-    
+
     docFrag.appendChild(tr);
   });
 
@@ -1886,13 +2046,10 @@ async function adminAddUser() {
       <div style="text-align:left;">
         <label class="small">Nama Penuh</label>
         <input id="swal-new-nama" class="swal2-input" placeholder="Contoh: Ahmad bin Ali" style="margin-top:5px; margin-bottom:15px;">
-        
         <label class="small">Sektor / Unit</label>
         <input id="swal-new-sektor" class="swal2-input" placeholder="Contoh: Sektor Pengurusan" style="margin-top:5px; margin-bottom:15px;">
-        
         <label class="small">Emel Rasmi (ID Log Masuk)</label>
         <input id="swal-new-email" type="email" class="swal2-input" placeholder="Contoh: ahmad@moe.gov.my" style="margin-top:5px; margin-bottom:15px;">
-        
         <label class="small">Kata Laluan Sementara</label>
         <input id="swal-new-pass" type="text" class="swal2-input" value="ppdag@12345" style="margin-top:5px;">
       </div>
@@ -1946,32 +2103,38 @@ async function adminAddUser() {
 
 async function loadAdminUserList() {
   const tbody = $('adminUserListBody');
-  if (!tbody) return;
+  if (!tbody || !supaClient || !state.user) return;
 
-  while (tbody.firstChild) tbody.removeChild(tbody.firstChild);
-  
+  if (adminUserListAbortController) {
+    adminUserListAbortController.abort();
+  }
+  const controller = new AbortController();
+  adminUserListAbortController = controller;
+
+  clearElementChildren(tbody);
+
   const loadingTr = document.createElement('tr');
   const loadingTd = document.createElement('td');
   loadingTd.colSpan = 4;
-  loadingTd.style.cssText = "text-align:center;padding:15px";
+  loadingTd.style.cssText = 'text-align:center;padding:15px';
   loadingTd.textContent = 'Memuatkan...';
   loadingTr.appendChild(loadingTd);
   tbody.appendChild(loadingTr);
-
-  if (!supaClient) return;
 
   const { data, error } = await supaClient.rpc('fn_get_all_users_secure_v2', {
     p_email: state.user.email,
     p_session_token: getSessionToken()
   });
 
-  while (tbody.firstChild) tbody.removeChild(tbody.firstChild);
+  if (controller.signal.aborted) return;
+
+  clearElementChildren(tbody);
 
   if (error || !data || !data.ok) {
     const tr = document.createElement('tr');
     const td = document.createElement('td');
     td.colSpan = 4;
-    td.style.cssText = "text-align:center;color:red";
+    td.style.cssText = 'text-align:center;color:red';
     td.textContent = 'Gagal akses data pengguna.';
     tr.appendChild(td);
     tbody.appendChild(tr);
@@ -1984,7 +2147,7 @@ async function loadAdminUserList() {
     const tr = document.createElement('tr');
     const td = document.createElement('td');
     td.colSpan = 4;
-    td.style.cssText = "text-align:center;padding:15px";
+    td.style.cssText = 'text-align:center;padding:15px';
     td.textContent = 'Tiada pengguna ditemui.';
     tr.appendChild(td);
     tbody.appendChild(tr);
@@ -2013,9 +2176,10 @@ async function loadAdminUserList() {
     tr.appendChild(tdEmail);
 
     const tdAction = document.createElement('td');
-    tdAction.style.cssText = "padding:10px; text-align:center; white-space:nowrap;";
+    tdAction.style.cssText = 'padding:10px; text-align:center; white-space:nowrap;';
 
     const btnReset = document.createElement('button');
+    btnReset.type = 'button';
     btnReset.className = 'btn-reset';
     btnReset.dataset.id = u.id;
     btnReset.dataset.email = u.email;
@@ -2024,18 +2188,19 @@ async function loadAdminUserList() {
     tdAction.appendChild(btnReset);
 
     const btnDel = document.createElement('button');
+    btnDel.type = 'button';
     btnDel.className = 'btn-reset btn-delete-user';
     btnDel.dataset.id = u.id;
     btnDel.dataset.email = u.email;
     btnDel.textContent = 'Buang';
-    btnDel.style.cssText = "color:var(--bad); border-color:var(--bad); margin-left:5px;";
+    btnDel.style.cssText = 'color:var(--bad); border-color:var(--bad); margin-left:5px;';
     btnDel.onclick = () => adminDeleteUser(btnDel.dataset.id, btnDel.dataset.email);
     tdAction.appendChild(btnDel);
 
     tr.appendChild(tdAction);
     docFrag.appendChild(tr);
   });
-  
+
   tbody.appendChild(docFrag);
 }
 
@@ -2108,15 +2273,20 @@ async function loadAdminBookingList() {
   if (!room) return toastWarn('Sila pilih bilik dahulu');
 
   const listDiv = $('adminList');
-  if (!listDiv) return;
-  while (listDiv.firstChild) listDiv.removeChild(listDiv.firstChild);
-  
+  if (!listDiv || !supaClient || !state.user) return;
+
+  if (adminBookingListAbortController) {
+    adminBookingListAbortController.abort();
+  }
+  const controller = new AbortController();
+  adminBookingListAbortController = controller;
+
+  clearElementChildren(listDiv);
+
   const loadingDiv = document.createElement('div');
-  loadingDiv.style.cssText = "padding:10px;text-align:center";
+  loadingDiv.style.cssText = 'padding:10px;text-align:center';
   loadingDiv.textContent = 'Memuatkan...';
   listDiv.appendChild(loadingDiv);
-
-  if (!supaClient) return;
 
   const { data } = await supaClient.rpc('fn_admin_list_bookings_v2', {
     p_email: state.user.email,
@@ -2124,7 +2294,9 @@ async function loadAdminBookingList() {
     p_session_token: getSessionToken()
   });
 
-  while (listDiv.firstChild) listDiv.removeChild(listDiv.firstChild);
+  if (controller.signal.aborted) return;
+
+  clearElementChildren(listDiv);
 
   if (!data || !data.ok) {
     const errorDiv = document.createElement('div');
@@ -2139,27 +2311,27 @@ async function loadAdminBookingList() {
 
   if (bookings.length === 0) {
     const emptyDiv = document.createElement('div');
-    emptyDiv.style.cssText = "padding:10px;text-align:center";
+    emptyDiv.style.cssText = 'padding:10px;text-align:center';
     emptyDiv.textContent = 'Tiada tempahan akan datang.';
     listDiv.appendChild(emptyDiv);
     return;
   }
 
   const table = document.createElement('table');
-  table.style.cssText = "width:100%; border-collapse:collapse; font-size:0.85rem;";
-  
+  table.style.cssText = 'width:100%; border-collapse:collapse; font-size:0.85rem;';
+
   const thead = document.createElement('thead');
   const trHead = document.createElement('tr');
-  trHead.style.cssText = "background:#f8fafc; text-align:left;";
-  
+  trHead.style.cssText = 'background:#f8fafc; text-align:left;';
+
   const thChk = document.createElement('th');
-  thChk.style.cssText = "padding:8px;width:30px";
+  thChk.style.cssText = 'padding:8px;width:30px';
   const chkAll = document.createElement('input');
   chkAll.type = 'checkbox';
   chkAll.id = 'chkAllDynamic';
   thChk.appendChild(chkAll);
   trHead.appendChild(thChk);
-  
+
   ['Tarikh', 'Masa', 'Tujuan', 'Penempah', 'Edit'].forEach((text, i) => {
     const th = document.createElement('th');
     th.style.padding = '8px';
@@ -2167,10 +2339,10 @@ async function loadAdminBookingList() {
     th.textContent = text;
     trHead.appendChild(th);
   });
-  
+
   thead.appendChild(trHead);
   table.appendChild(thead);
-  
+
   const tbody = document.createElement('tbody');
 
   bookings.forEach(b => {
@@ -2178,7 +2350,7 @@ async function loadAdminBookingList() {
     tr.style.borderBottom = '1px solid #eee';
 
     const tdChk = document.createElement('td');
-    tdChk.style.cssText = "padding:8px;text-align:center";
+    tdChk.style.cssText = 'padding:8px;text-align:center';
     const chk = document.createElement('input');
     chk.type = 'checkbox';
     chk.className = 'chk-item';
@@ -2207,16 +2379,17 @@ async function loadAdminBookingList() {
     tr.appendChild(tdPenempah);
 
     const tdAction = document.createElement('td');
-    tdAction.style.cssText = "padding:8px;text-align:center";
+    tdAction.style.cssText = 'padding:8px;text-align:center';
     const btnEdit = document.createElement('button');
+    btnEdit.type = 'button';
     btnEdit.className = 'btn-edit';
     btnEdit.dataset.id = b.id;
-    btnEdit.style.cssText = "border:none;background:none;cursor:pointer";
+    btnEdit.style.cssText = 'border:none;background:none;cursor:pointer;min-height:36px;';
     btnEdit.textContent = '✏️';
     btnEdit.onclick = () => openEditModal(btnEdit.dataset.id);
     tdAction.appendChild(btnEdit);
     tr.appendChild(tdAction);
-    
+
     tbody.appendChild(tr);
   });
 
@@ -2226,7 +2399,7 @@ async function loadAdminBookingList() {
   const chkAllDynamic = $('chkAllDynamic');
   if (chkAllDynamic) {
     chkAllDynamic.addEventListener('change', (e) => {
-      document.querySelectorAll('.chk-item').forEach(c => c.checked = e.target.checked);
+      document.querySelectorAll('.chk-item').forEach(c => { c.checked = e.target.checked; });
     });
   }
 }
@@ -2279,62 +2452,16 @@ async function executeBulkCancel() {
 
 async function openEditModal(id) {
   const b = adminState.bookings.find(x => x.id === id);
-  if (!b || !isSwalAvailable()) return;
+  if (!b) return;
 
-  const { value: form } = await Swal.fire({
-    title: 'Edit Tempahan',
-    html: `
-      <label class="small">Tarikh</label><input id="eDate" type="date" class="swal2-input" value="${b.tarikh}">
-      <label class="small">Masa Mula</label><input id="eStart" type="time" class="swal2-input" value="${toHHMM(b.masa_mula)}">
-      <label class="small">Masa Tamat</label><input id="eEnd" type="time" class="swal2-input" value="${toHHMM(b.masa_tamat)}">
-      <label class="small">Tujuan</label><input id="eNote" class="swal2-input" value="${escapeHtml(b.tujuan)}">
-    `,
-    showCancelButton: true,
-    confirmButtonText: 'Simpan',
-    preConfirm: () => ({
-      d: $('eDate').value,
-      s: $('eStart').value,
-      e: $('eEnd').value,
-      n: $('eNote').value
-    })
+  await openUnifiedBookingEditModal(b, 'Edit Tempahan', id, async () => {
+    loadAdminBookingList();
+    loadMyBookings(false);
+    if (state.room) refreshCalendar(false);
+    loadOverview(false);
+    const tabAdminSearch = $('tabAdminSearch');
+    if (tabAdminSearch && tabAdminSearch.classList.contains('active')) executeAdminSearch();
   });
-
-  if (form) {
-    if (!supaClient) return toastErr('Perkhidmatan belum bersedia.');
-    const isConfirmed = await modalConfirm(
-      'Simpan Perubahan?',
-      'Maklumat tempahan asal akan digantikan dengan data baharu.'
-    );
-    if (!isConfirmed) return;
-
-    modalLoading('Menyimpan...');
-    const { data } = await supaClient.rpc('fn_update_booking_secure_v2', {
-      p_booking_id: id,
-      p_email: state.user.email,
-      p_date: form.d,
-      p_start: form.s,
-      p_end: form.e,
-      p_category: b.kategori,
-      p_note: form.n,
-      p_sektor: b.sektor,
-      p_nama: b.nama_penempah,
-      p_session_token: getSessionToken()
-    });
-    modalClose();
-
-    if (data && data.ok) {
-      toastOk('Tempahan dikemaskini.');
-      await clearActiveCaches();
-      loadAdminBookingList();
-      loadMyBookings(false);
-      if (state.room) refreshCalendar(false);
-      loadOverview(false);
-      const tabAdminSearch = $('tabAdminSearch');
-      if (tabAdminSearch && tabAdminSearch.classList.contains('active')) executeAdminSearch();
-    } else {
-      Swal.fire('Ralat', data?.error || 'Ralat tidak diketahui', 'error');
-    }
-  }
 }
 
 async function executeAdminSearch() {
@@ -2345,7 +2472,7 @@ async function executeAdminSearch() {
   const endDate = endDateEl ? endDateEl.value : '';
   const room = roomEl ? roomEl.value : '';
   const tbody = $('adminSearchTableBody');
-  
+
   if (!tbody) return;
 
   if (!startDate || !endDate) {
@@ -2355,23 +2482,29 @@ async function executeAdminSearch() {
     return toastWarn('Tarikh mula mesti sebelum atau sama dengan tarikh akhir');
   }
 
-  while (tbody.firstChild) tbody.removeChild(tbody.firstChild);
-  
+  if (!supaClient) return;
+
+  if (adminSearchAbortController) {
+    adminSearchAbortController.abort();
+  }
+  const controller = new AbortController();
+  adminSearchAbortController = controller;
+
+  clearElementChildren(tbody);
+
   const loadingTr = document.createElement('tr');
   const loadingTd = document.createElement('td');
   loadingTd.colSpan = 7;
-  loadingTd.style.cssText = "text-align:center;padding:15px";
+  loadingTd.style.cssText = 'text-align:center;padding:15px';
   loadingTd.textContent = 'Memuatkan...';
   loadingTr.appendChild(loadingTd);
   tbody.appendChild(loadingTr);
-  
+
   const adminSearchStats = $('adminSearchStats');
   if (adminSearchStats) adminSearchStats.style.display = 'none';
 
   const btnAdminPrintSearch = $('btnAdminPrintSearch');
   if (btnAdminPrintSearch) btnAdminPrintSearch.style.display = 'none';
-
-  if (!supaClient) return;
 
   modalLoading('Mencari rekod...');
 
@@ -2387,16 +2520,22 @@ async function executeAdminSearch() {
     query = query.eq('bilik', room);
   }
 
-  const { data, error } = await query;
-  modalClose();
+  if (typeof query.abortSignal === 'function') {
+    query = query.abortSignal(controller.signal);
+  }
 
-  while (tbody.firstChild) tbody.removeChild(tbody.firstChild);
+  const { data, error } = await query;
+
+  if (controller.signal.aborted) return;
+
+  modalClose();
+  clearElementChildren(tbody);
 
   if (error) {
     const tr = document.createElement('tr');
     const td = document.createElement('td');
     td.colSpan = 7;
-    td.style.cssText = "text-align:center;color:red";
+    td.style.cssText = 'text-align:center;color:red';
     td.textContent = 'Ralat memuatkan carian.';
     tr.appendChild(td);
     tbody.appendChild(tr);
@@ -2413,8 +2552,8 @@ function populateAdminSearchUserFilter() {
   const filterEl = $('adminSearchUserFilter');
   if (!filterEl) return;
 
-  while (filterEl.firstChild) filterEl.removeChild(filterEl.firstChild);
-  
+  clearElementChildren(filterEl);
+
   const defaultOpt = document.createElement('option');
   defaultOpt.value = '';
   defaultOpt.textContent = '— Semua Penempah —';
@@ -2441,7 +2580,7 @@ function populateAdminSearchUserFilter() {
 function renderAdminSearchTable() {
   const tbody = $('adminSearchTableBody');
   if (!tbody) return;
-  
+
   let data = adminState.searchData;
   const filterUserEl = $('adminSearchUserFilter');
   const filterUser = filterUserEl ? filterUserEl.value : '';
@@ -2449,8 +2588,8 @@ function renderAdminSearchTable() {
   if (filterUser) {
     data = data.filter(b => b.nama_penempah === filterUser);
   }
-  
-  while (tbody.firstChild) tbody.removeChild(tbody.firstChild);
+
+  clearElementChildren(tbody);
 
   const adminSearchStats = $('adminSearchStats');
   const btnAdminPrintSearch = $('btnAdminPrintSearch');
@@ -2459,11 +2598,11 @@ function renderAdminSearchTable() {
     const tr = document.createElement('tr');
     const td = document.createElement('td');
     td.colSpan = 7;
-    td.style.cssText = "text-align:center;padding:15px";
+    td.style.cssText = 'text-align:center;padding:15px';
     td.textContent = 'Tiada tempahan ditemui untuk kriteria ini.';
     tr.appendChild(td);
     tbody.appendChild(tr);
-    
+
     if (adminSearchStats) adminSearchStats.style.display = 'none';
     if (btnAdminPrintSearch) btnAdminPrintSearch.style.display = 'none';
     return;
@@ -2530,25 +2669,27 @@ function renderAdminSearchTable() {
 
     const tdAction = document.createElement('td');
     tdAction.style.textAlign = 'center';
-    
+
     const divWrap = document.createElement('div');
-    divWrap.style.cssText = "display:flex; gap:8px; justify-content:center;";
+    divWrap.style.cssText = 'display:flex; gap:8px; justify-content:center;';
 
     const btnEdit = document.createElement('button');
+    btnEdit.type = 'button';
     btnEdit.className = 'btn-icon-edit-search';
     btnEdit.dataset.id = b.booking_id;
     btnEdit.title = 'Kemaskini Tempahan';
     btnEdit.textContent = '✏️';
-    btnEdit.style.cssText = "background:none; border:none; cursor:pointer; font-size:1.1rem;";
+    btnEdit.style.cssText = 'background:none; border:none; cursor:pointer; font-size:1.1rem; min-height:36px;';
     btnEdit.addEventListener('click', () => openAdminSearchEditModal(btnEdit.dataset.id, adminState.searchData));
     divWrap.appendChild(btnEdit);
 
     const btnDel = document.createElement('button');
+    btnDel.type = 'button';
     btnDel.className = 'btn-icon-del-search';
     btnDel.dataset.id = b.booking_id;
     btnDel.title = 'Batal Tempahan';
     btnDel.textContent = '🗑️';
-    btnDel.style.cssText = "background:none; border:none; cursor:pointer; font-size:1.1rem;";
+    btnDel.style.cssText = 'background:none; border:none; cursor:pointer; font-size:1.1rem; min-height:36px;';
     btnDel.addEventListener('click', async () => {
       await cancelBooking(btnDel.dataset.id);
     });
@@ -2559,61 +2700,18 @@ function renderAdminSearchTable() {
 
     docFrag.appendChild(tr);
   });
-  
+
   tbody.appendChild(docFrag);
 }
 
 async function openAdminSearchEditModal(id, searchData) {
   const b = searchData.find(x => x.booking_id === id);
-  if (!b || !isSwalAvailable()) return;
+  if (!b) return;
 
-  const { value: form } = await Swal.fire({
-    title: 'Edit Tempahan (Admin)',
-    html: `
-      <label class="small">Tarikh</label><input id="eDate" type="date" class="swal2-input" value="${toYMDNorm(b.tarikh)}">
-      <label class="small">Masa Mula</label><input id="eStart" type="time" class="swal2-input" value="${toHHMM(b.masa_mula)}">
-      <label class="small">Masa Tamat</label><input id="eEnd" type="time" class="swal2-input" value="${toHHMM(b.masa_tamat)}">
-      <label class="small">Tujuan</label><input id="eNote" class="swal2-input" value="${escapeHtml(b.tujuan)}">
-    `,
-    showCancelButton: true,
-    confirmButtonText: 'Simpan',
-    preConfirm: () => ({
-      d: $('eDate').value,
-      s: $('eStart').value,
-      e: $('eEnd').value,
-      n: $('eNote').value
-    })
+  await openUnifiedBookingEditModal(b, 'Edit Tempahan (Admin)', id, async () => {
+    executeAdminSearch();
+    loadOverview(false);
+    loadMyBookings(false);
+    if (state.room === b.bilik) refreshCalendar(false);
   });
-
-  if (form) {
-    if (!supaClient) return toastErr('Perkhidmatan belum bersedia.');
-    const isConfirmed = await modalConfirm('Simpan Perubahan?', 'Maklumat tempahan asal akan digantikan dengan data baharu.');
-    if (!isConfirmed) return;
-
-    modalLoading('Menyimpan...');
-    const { data } = await supaClient.rpc('fn_update_booking_secure_v2', {
-      p_booking_id: id,
-      p_email: state.user.email,
-      p_date: form.d,
-      p_start: form.s,
-      p_end: form.e,
-      p_category: b.kategori,
-      p_note: form.n,
-      p_sektor: b.sektor,
-      p_nama: b.nama_penempah,
-      p_session_token: getSessionToken()
-    });
-    modalClose();
-
-    if (data && data.ok) {
-      toastOk('Tempahan berjaya dikemaskini.');
-      await clearActiveCaches();
-      executeAdminSearch();
-      loadOverview(false);
-      loadMyBookings(false);
-      if (state.room === b.bilik) refreshCalendar(false);
-    } else {
-      Swal.fire('Ralat', data?.error || 'Ralat tidak diketahui', 'error');
-    }
-  }
 }

@@ -1,4 +1,4 @@
-const CACHE_NAME = 'erom-ag-v12';
+const CACHE_NAME = 'erom-ag-v13';
 const ASSETS_TO_CACHE = [
   './',
   './index.html',
@@ -8,6 +8,7 @@ const ASSETS_TO_CACHE = [
   './config.js',
   './idb-cache.js',
   './realtime.js',
+  './migration.js',
   './manifest.json'
 ];
 
@@ -22,15 +23,18 @@ self.addEventListener('install', (event) => {
 
 self.addEventListener('activate', (event) => {
   event.waitUntil(
-    caches.keys().then((keyList) => {
-      return Promise.all(
-        keyList.map((key) => {
-          if (key !== CACHE_NAME) {
-            return caches.delete(key);
-          }
-        })
-      );
-    }).then(() => self.clients.claim())
+    caches
+      .keys()
+      .then((keyList) => {
+        return Promise.all(
+          keyList.map((key) => {
+            if (key !== CACHE_NAME) {
+              return caches.delete(key);
+            }
+          })
+        );
+      })
+      .then(() => self.clients.claim())
   );
 });
 
@@ -52,7 +56,14 @@ self.addEventListener('fetch', (event) => {
   event.respondWith(
     fetch(event.request)
       .then((networkResponse) => {
-        if (networkResponse && networkResponse.status === 200 && networkResponse.type === 'basic') {
+        const cacheControl = networkResponse.headers.get('Cache-Control') || '';
+        const shouldCache =
+          networkResponse &&
+          networkResponse.status === 200 &&
+          networkResponse.type === 'basic' &&
+          !cacheControl.toLowerCase().includes('no-store');
+
+        if (shouldCache) {
           const responseClone = networkResponse.clone();
           caches.open(CACHE_NAME).then((cache) => {
             cache.put(event.request, responseClone);

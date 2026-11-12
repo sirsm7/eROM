@@ -1,3 +1,7 @@
+*, *::before, *::after {
+  box-sizing: border-box;
+}
+
 :root {
   --bg: #f1f5f9;
   --text: #1e293b;
@@ -17,10 +21,12 @@
 html, body {
   margin: 0;
   padding: 0;
+  min-height: 100dvh;
   background: var(--bg);
   color: var(--text);
   font-family: 'Oswald', sans-serif;
   -webkit-font-smoothing: antialiased;
+  overflow-x: hidden;
 }
 
 .wrap {
@@ -77,6 +83,7 @@ h1 {
   background: #e2e8f0;
   color: var(--muted);
   padding: 10px 20px;
+  min-height: 44px;
   border-radius: 50px;
   cursor: pointer;
   font-weight: 500;
@@ -84,6 +91,9 @@ h1 {
   white-space: nowrap;
   font-size: 0.95rem;
   box-shadow: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .tabbtn.active {
@@ -96,6 +106,7 @@ h1 {
 
 .tabpane {
   display: none;
+  min-width: 0;
 }
 
 .tabpane.active {
@@ -121,6 +132,7 @@ h1 {
   padding: 20px;
   box-shadow: var(--shadow);
   margin-bottom: 20px;
+  min-width: 0;
 }
 
 .toolbar {
@@ -128,6 +140,11 @@ h1 {
   grid-template-columns: 1fr auto auto;
   gap: 16px;
   align-items: center;
+}
+
+.toolbar > div,
+.row > div {
+  min-width: 0;
 }
 
 .row {
@@ -147,19 +164,27 @@ label.small {
   display: inline-block;
 }
 
-select, input[type="time"], input[type="text"], input[type="date"], button {
+select,
+input[type="time"],
+input[type="text"],
+input[type="date"],
+input[type="file"],
+button {
   font-family: inherit;
   font-size: 1rem;
   border: 1px solid var(--ring);
   border-radius: 10px;
   padding: 10px 14px;
+  min-height: 44px;
   background: #f8fafc;
   outline: none;
   transition: all 0.2s;
   color: var(--text);
+  max-width: 100%;
 }
 
-select:focus, input:focus {
+select:focus,
+input:focus {
   background: #fff;
   border-color: var(--primary);
   box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.1);
@@ -170,15 +195,25 @@ select:focus, input:focus {
   background: var(--primary);
   color: #fff;
   padding: 10px 20px;
+  min-height: 44px;
   border-radius: 10px;
   cursor: pointer;
   font-weight: 500;
   letter-spacing: 0.5px;
   box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
 }
 
 .btn:active {
   transform: scale(0.98);
+}
+
+.btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
 }
 
 .btn.secondary {
@@ -190,6 +225,11 @@ select:focus, input:focus {
   border: 1px solid var(--ring);
   color: var(--text);
   box-shadow: none;
+}
+
+.btn.ok {
+  background: var(--ok);
+  color: #fff;
 }
 
 .req::after {
@@ -226,6 +266,7 @@ select:focus, input:focus {
   display: grid;
   grid-template-rows: auto 1fr;
   gap: 12px;
+  min-width: 0;
 }
 
 .weekday {
@@ -256,6 +297,7 @@ select:focus, input:focus {
   display: flex;
   flex-direction: column;
   transition: transform 0.1s, border-color 0.1s;
+  min-width: 0;
 }
 
 .tile:hover {
@@ -313,6 +355,7 @@ select:focus, input:focus {
   font-size: 0.9rem;
   line-height: 1.4;
   color: var(--text);
+  word-break: break-word;
 }
 
 .tile.sel {
@@ -336,6 +379,7 @@ select:focus, input:focus {
   border: none;
   background: transparent;
   padding: 6px 14px;
+  min-height: 36px;
   border-radius: 8px;
   font-size: 0.9rem;
   font-weight: 500;
@@ -356,6 +400,12 @@ select:focus, input:focus {
   padding: 8px 12px;
   border-radius: 8px;
   font-weight: 600;
+}
+
+.table-responsive {
+  width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
 }
 
 table {
@@ -433,8 +483,9 @@ tr:last-child td {
 .btn-icon {
   background: #f1f5f9;
   color: var(--text);
-  width: 32px;
-  height: 32px;
+  width: 36px;
+  height: 36px;
+  min-height: 36px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -471,7 +522,8 @@ tr:last-child td {
   background: var(--warn);
   color: #000;
   border: none;
-  padding: 6px 14px;
+  padding: 8px 16px;
+  min-height: 44px;
   border-radius: 8px;
   font-weight: 600;
   cursor: pointer;
@@ -490,7 +542,8 @@ tr:last-child td {
   align-items: center;
   gap: 8px;
   background: rgba(255,255,255,0.15);
-  padding: 4px 12px;
+  padding: 6px 14px;
+  min-height: 44px;
   border-radius: 50px;
   border: 1px solid rgba(255,255,255,0.2);
   cursor: pointer;
@@ -521,6 +574,38 @@ tr:last-child td {
   padding-bottom: 20px;
 }
 
+.admin-migration-section {
+  margin-top: 24px;
+  border-top: 2px dashed var(--ring);
+  padding-top: 20px;
+}
+
+.migration-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: flex-end;
+  margin-top: 10px;
+}
+
+.migration-file-group {
+  flex: 1;
+  min-width: 240px;
+}
+
+.migration-file-input {
+  width: 100%;
+  padding: 8px 12px;
+  background: #f8fafc;
+  border: 1px dashed var(--accent);
+  border-radius: 10px;
+  cursor: pointer;
+}
+
+.migration-status-area {
+  margin-top: 12px;
+}
+
 .scrollable-table {
   overflow-x: auto;
   max-height: 400px;
@@ -533,7 +618,8 @@ tr:last-child td {
   border: 1px solid var(--ring);
   color: var(--text);
   font-size: 0.8rem;
-  padding: 4px 10px;
+  padding: 6px 12px;
+  min-height: 36px;
   border-radius: 6px;
   cursor: pointer;
 }
@@ -592,9 +678,12 @@ tr:last-child td {
   .tabbtn {
     padding: 8px 16px;
     font-size: 0.85rem;
+    min-height: 44px;
   }
 
-  .row, .toolbar {
+  .row,
+  .toolbar,
+  .migration-controls {
     display: flex;
     flex-direction: column;
     align-items: stretch;
@@ -605,12 +694,18 @@ tr:last-child td {
     grid-template-columns: 1fr;
   }
 
-  .row > div, .toolbar > div {
+  .row > div,
+  .toolbar > div,
+  .migration-controls > div {
     width: 100% !important;
     margin: 0 !important;
   }
 
-  select, input, button, .btn {
+  select,
+  input,
+  button,
+  .btn,
+  .btn-reset {
     width: 100%;
     min-height: 48px;
     font-size: 16px;
@@ -689,7 +784,7 @@ tr:last-child td {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    min-height: 36px;
+    min-height: 44px;
   }
 
   td::before {
