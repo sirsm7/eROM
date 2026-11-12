@@ -14,12 +14,27 @@ export const MIGRATION_TABLE_SCHEMAS = Object.freeze({
   erom_users: Object.freeze({
     table_name: 'erom_users',
     primary_key: 'id',
-    headers: Object.freeze(['id', 'nama', 'sektor', 'email', 'role'])
+    headers: Object.freeze([
+      'id',
+      'nama',
+      'sektor',
+      'email',
+      'role',
+      'password',
+      'created_at'
+    ])
   }),
   erom_pic: Object.freeze({
     table_name: 'erom_pic',
-    primary_key: 'bilik',
-    headers: Object.freeze(['bilik', 'telegram_id', 'telegram_username', 'is_pic'])
+    primary_key: 'id',
+    headers: Object.freeze([
+      'id',
+      'bilik',
+      'telegram_id',
+      'telegram_username',
+      'is_pic',
+      'registered_at'
+    ])
   }),
   erom_bookings: Object.freeze({
     table_name: 'erom_bookings',
@@ -35,12 +50,11 @@ export const MIGRATION_TABLE_SCHEMAS = Object.freeze({
       'sektor',
       'nama_penempah',
       'status',
+      'created_at',
       'updated_at'
     ])
   })
 });
-
-const UPSERT_BATCH_SIZE = 100;
 
 let isExportInProgress = false;
 let isImportInProgress = false;
@@ -292,52 +306,6 @@ export function validateMigrationPayload(payload) {
   };
 }
 
-async function fetchTableRowsForExport(client, tableName, schema, options, signal) {
-  throwIfAborted(signal);
-
-  const selectColumns = schema.headers.join(',');
-  let query = client
-    .from(tableName)
-    .select(selectColumns)
-    .order(schema.primary_key, { ascending: true });
-
-  if (signal && typeof query.abortSignal === 'function') {
-    query = query.abortSignal(signal);
-  }
-
-  const { data, error } = await query;
-  throwIfAborted(signal);
-
-  if (!error && Array.isArray(data)) {
-    return data.map((row) => normalizeRowByHeaders(row, schema.headers));
-  }
-
-  if (tableName === 'erom_users' && options && options.adminEmail && options.sessionToken) {
-    const rpcRes = await client.rpc('fn_get_all_users_secure_v2', {
-      p_email: options.adminEmail,
-      p_session_token: options.sessionToken
-    });
-    throwIfAborted(signal);
-
-    if (!rpcRes.error && rpcRes.data && rpcRes.data.ok && Array.isArray(rpcRes.data.data)) {
-      return rpcRes.data.data.map((u) =>
-        normalizeRowByHeaders(
-          {
-            id: u.id,
-            nama: u.nama,
-            sektor: u.sektor,
-            email: u.email,
-            role: u.role || 'USER'
-          },
-          schema.headers
-        )
-      );
-    }
-  }
-
-  throw new Error(error ? error.message : `Gagal mengekstrak data daripada jadual "${tableName}".`);
-}
-
 function triggerJsonDownload(jsonContent, filename) {
   const blob = new Blob([jsonContent], { type: 'application/json' });
   const objectUrl = URL.createObjectURL(blob);
@@ -348,7 +316,9 @@ function triggerJsonDownload(jsonContent, filename) {
   document.body.appendChild(anchor);
   anchor.click();
   document.body.removeChild(anchor);
-  URL.revokeObjectURL(objectUrl);
+  setTimeout(() => {
+    URL.revokeObjectURL(objectUrl);
+  }, 1000);
 }
 
 export async function exportDatabaseJSON(options = {}) {
@@ -357,6 +327,15 @@ export async function exportDatabaseJSON(options = {}) {
   }
 
   const statusEl = options.statusEl || null;
+  const adminEmail = String(options.adminEmail || '').trim();
+  const sessionToken = String(options.sessionToken || '').trim();
+
+  if (!adminEmail || !sessionToken) {
+    const msg = 'Sesi pentadbir tidak sah atau tamat tempoh. Sila log masuk semula sebagai Pentadbir.';
+    renderMigrationStatus(statusEl, { type: 'error', title: 'Akses Ditolak', message: msg });
+    return { ok: false, error: msg };
+  }
+
   const controller = new AbortController();
   activeAbortController = controller;
   isExportInProgress = true;
@@ -365,7 +344,7 @@ export async function exportDatabaseJSON(options = {}) {
     renderMigrationStatus(statusEl, {
       type: 'info',
       title: 'Menjana Sandaran JSON 1-to-1...',
-      message: 'Sedang mengekstrak semua jadual sistem daripada pangkalan data.'
+      message: 'Sedang mengekstrak semua jadual sistem melalui RPC pentadbir.'
     });
 
     if (typeof window !== 'undefined' && window.ENV_READY) {
@@ -376,6 +355,26 @@ export async function exportDatabaseJSON(options = {}) {
     const client = await getSupabaseClient();
     throwIfAborted(controller.signal);
 
+    let rpcQuery = client.rpc('fn_admin_export_database_v2', {
+      p_admin_email: adminEmail,
+      p_session_token: sessionToken
+    });
+
+    if (controller.signal && typeof rpcQuery.abortSignal === 'function') {
+      rpcQuery = rpcQuery.abortSignal(controller.signal);
+    }
+
+    const { data: rpcResponse, error: rpcError } = await rpcQuery;
+    throwIfAborted(controller.signal);
+
+    if (rpcError) {
+      throw new Error(rpcError.message || 'Gagal melaksanakan RPC eksport pangkalan data.');
+    }
+
+    if (!rpcResponse || !rpcResponse.ok || !isPlainObject(rpcResponse.data)) {
+      throw new Error((rpcResponse && rpcResponse.error) || 'Pelayan gagal memulangkan data eksport yang sah.');
+    }
+
     const exportedAt = new Date().toISOString();
     const tablesOutput = {};
     const summaryDetails = [];
@@ -383,7 +382,8 @@ export async function exportDatabaseJSON(options = {}) {
     for (let i = 0; i < MIGRATION_TABLE_ORDER.length; i++) {
       const tableName = MIGRATION_TABLE_ORDER[i];
       const schema = MIGRATION_TABLE_SCHEMAS[tableName];
-      const rows = await fetchTableRowsForExport(client, tableName, schema, options, controller.signal);
+      const rawRows = Array.isArray(rpcResponse.data[tableName]) ? rpcResponse.data[tableName] : [];
+      const rows = rawRows.map((row) => normalizeRowByHeaders(row, schema.headers));
 
       tablesOutput[tableName] = {
         table_name: schema.table_name,
@@ -441,6 +441,14 @@ export async function importDatabaseJSON(file, options = {}) {
   }
 
   const statusEl = options.statusEl || null;
+  const adminEmail = String(options.adminEmail || '').trim();
+  const sessionToken = String(options.sessionToken || '').trim();
+
+  if (!adminEmail || !sessionToken) {
+    const msg = 'Sesi pentadbir tidak sah atau tamat tempoh. Sila log masuk semula sebagai Pentadbir.';
+    renderMigrationStatus(statusEl, { type: 'error', title: 'Akses Ditolak', message: msg });
+    return { ok: false, error: msg };
+  }
 
   if (!file) {
     const msg = 'Sila pilih fail sandaran .json terlebih dahulu.';
@@ -495,47 +503,42 @@ export async function importDatabaseJSON(file, options = {}) {
     throwIfAborted(controller.signal);
 
     const validatedData = validation.data;
-    const summaryDetails = [];
 
     renderMigrationStatus(statusEl, {
       type: 'info',
       title: 'Memulihkan Data 1-to-1 ke Pangkalan Data...',
-      message: 'Melaksanakan operasi upsert berkelompok mengikut kebergantungan kunci asing.'
+      message: 'Melaksanakan transaksi upsert atomik melalui RPC pentadbir mengikut urutan kunci asing.'
     });
 
+    let rpcQuery = client.rpc('fn_admin_import_database_v2', {
+      p_admin_email: adminEmail,
+      p_session_token: sessionToken,
+      p_tables: validatedData.tables
+    });
+
+    if (controller.signal && typeof rpcQuery.abortSignal === 'function') {
+      rpcQuery = rpcQuery.abortSignal(controller.signal);
+    }
+
+    const { data: rpcResponse, error: rpcError } = await rpcQuery;
+    throwIfAborted(controller.signal);
+
+    if (rpcError) {
+      throw new Error(rpcError.message || 'Gagal melaksanakan RPC pemulihan pangkalan data.');
+    }
+
+    if (!rpcResponse || !rpcResponse.ok) {
+      throw new Error((rpcResponse && rpcResponse.error) || 'Pelayan gagal memulihkan data JSON.');
+    }
+
+    const counts = isPlainObject(rpcResponse.counts) ? rpcResponse.counts : {};
+    const summaryDetails = [];
+
     for (let i = 0; i < validatedData.metadata.table_order.length; i++) {
-      throwIfAborted(controller.signal);
-
       const tableName = validatedData.metadata.table_order[i];
-      const tableEntry = validatedData.tables[tableName];
-      const rows = tableEntry.rows;
-
-      if (rows.length === 0) {
-        summaryDetails.push(`${tableName}: 0 rekod (tiada baris untuk dipulihkan)`);
-        continue;
-      }
-
-      for (let offset = 0; offset < rows.length; offset += UPSERT_BATCH_SIZE) {
-        throwIfAborted(controller.signal);
-
-        const batch = rows.slice(offset, offset + UPSERT_BATCH_SIZE);
-        let upsertQuery = client
-          .from(tableName)
-          .upsert(batch, { onConflict: tableEntry.primary_key });
-
-        if (controller.signal && typeof upsertQuery.abortSignal === 'function') {
-          upsertQuery = upsertQuery.abortSignal(controller.signal);
-        }
-
-        const { error } = await upsertQuery;
-        throwIfAborted(controller.signal);
-
-        if (error) {
-          throw new Error(`Ralat upsert pada jadual "${tableName}" (baris ${offset + 1}-${offset + batch.length}): ${error.message}`);
-        }
-      }
-
-      summaryDetails.push(`${tableName}: ${rows.length} rekod berjaya dipulihkan`);
+      const fallbackCount = validatedData.tables[tableName].rows.length;
+      const restoredCount = typeof counts[tableName] === 'number' ? counts[tableName] : fallbackCount;
+      summaryDetails.push(`${tableName}: ${restoredCount} rekod berjaya dipulihkan`);
     }
 
     await clearAllCache();

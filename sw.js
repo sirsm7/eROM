@@ -1,4 +1,4 @@
-const CACHE_NAME = 'erom-ag-v13';
+const CACHE_NAME = 'erom-ag-v14';
 const ASSETS_TO_CACHE = [
   './',
   './index.html',
@@ -31,6 +31,7 @@ self.addEventListener('activate', (event) => {
             if (key !== CACHE_NAME) {
               return caches.delete(key);
             }
+            return Promise.resolve();
           })
         );
       })
@@ -65,9 +66,12 @@ self.addEventListener('fetch', (event) => {
 
         if (shouldCache) {
           const responseClone = networkResponse.clone();
-          caches.open(CACHE_NAME).then((cache) => {
-            cache.put(event.request, responseClone);
-          });
+          caches
+            .open(CACHE_NAME)
+            .then((cache) => {
+              return cache.put(event.request, responseClone);
+            })
+            .catch(() => {});
         }
         return networkResponse;
       })

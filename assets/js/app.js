@@ -7,7 +7,8 @@ import {
 } from "../../idb-cache.js";
 import {
   exportDatabaseJSON,
-  importDatabaseJSON
+  importDatabaseJSON,
+  abortMigrationOperations
 } from "../../migration.js";
 
 const SHOW_PAST_DAYS = false;
@@ -490,8 +491,10 @@ async function handleAdminExportJson() {
   }
 
   const btnExportJson = $('btnExportJson');
+  const btnImportJson = $('btnImportJson');
   const statusEl = $('migrationStatusArea');
   if (btnExportJson) btnExportJson.disabled = true;
+  if (btnImportJson) btnImportJson.disabled = true;
 
   try {
     const result = await exportDatabaseJSON({
@@ -507,6 +510,7 @@ async function handleAdminExportJson() {
     }
   } finally {
     if (btnExportJson) btnExportJson.disabled = false;
+    if (btnImportJson) btnImportJson.disabled = false;
   }
 }
 
@@ -516,6 +520,7 @@ async function handleAdminImportJson() {
   }
 
   const fileInput = $('importJsonFile');
+  const btnExportJson = $('btnExportJson');
   const btnImportJson = $('btnImportJson');
   const statusEl = $('migrationStatusArea');
   const file = fileInput && fileInput.files ? fileInput.files[0] : null;
@@ -532,11 +537,14 @@ async function handleAdminImportJson() {
 
   if (!isConfirmed) return;
 
+  if (btnExportJson) btnExportJson.disabled = true;
   if (btnImportJson) btnImportJson.disabled = true;
 
   try {
     const result = await importDatabaseJSON(file, {
       statusEl,
+      adminEmail: state.user.email,
+      sessionToken: getSessionToken(),
       onComplete: async () => {
         if (fileInput) fileInput.value = '';
         await syncAllActiveViews();
@@ -554,6 +562,7 @@ async function handleAdminImportJson() {
       toastErr(result.error || 'Gagal mengimport fail JSON.');
     }
   } finally {
+    if (btnExportJson) btnExportJson.disabled = false;
     if (btnImportJson) btnImportJson.disabled = false;
   }
 }
@@ -725,10 +734,6 @@ function toggleCalendarHint() {
 
 function resetUserState() {
   Object.assign(state, DEFAULT_USER_STATE);
-  state.isAdmin = false;
-  state.user = null;
-  state.sessionToken = null;
-  state.sessionExpiresAt = null;
   state.myBookings = [];
 }
 
@@ -849,6 +854,20 @@ function onLoginSuccess() {
 async function onLogout() {
   const currentSessionToken = getSessionToken();
 
+  if (adminSearchAbortController) {
+    adminSearchAbortController.abort();
+    adminSearchAbortController = null;
+  }
+  if (adminBookingListAbortController) {
+    adminBookingListAbortController.abort();
+    adminBookingListAbortController = null;
+  }
+  if (adminUserListAbortController) {
+    adminUserListAbortController.abort();
+    adminUserListAbortController = null;
+  }
+  abortMigrationOperations();
+
   if (currentSessionToken && supaClient) {
     try {
       await supaClient.rpc('fn_logout_secure', { p_session_token: currentSessionToken });
@@ -859,6 +878,8 @@ async function onLogout() {
   deleteCacheByPrefix('my_').catch(() => {});
 
   resetUserState();
+  adminState.bookings = [];
+  adminState.searchData = [];
   localStorage.removeItem('erom_user');
   localStorage.removeItem('erom_session_token');
   localStorage.removeItem('erom_session_expires_at');
@@ -880,6 +901,9 @@ async function onLogout() {
 
   const adminPanel = $('adminPanel');
   if (adminPanel) adminPanel.style.display = 'none';
+
+  const migrationStatusArea = $('migrationStatusArea');
+  if (migrationStatusArea) clearElementChildren(migrationStatusArea);
 
   const btnMyBookings = $('tabTempahanSayaBtn');
   if (btnMyBookings) btnMyBookings.style.display = 'none';
