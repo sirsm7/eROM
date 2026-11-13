@@ -10,6 +10,15 @@ let lifecycleListenersBound = false;
 
 const timestampRegistry = new Map();
 
+export function getActiveSchema() {
+  const env = (typeof window !== 'undefined' && window.__ENV) ? window.__ENV : {};
+  const schema = String(env.SUPABASE_SCHEMA || 'erom_ag').trim();
+  if (!schema || schema.toLowerCase() === 'public') {
+    return 'erom_ag';
+  }
+  return schema;
+}
+
 async function resolveCreateClient() {
   if (
     typeof window !== 'undefined' &&
@@ -43,11 +52,13 @@ function createChannelSubscription(client) {
     return null;
   }
 
+  const targetSchema = getActiveSchema();
+
   return client
-    .channel('public:erom_bookings')
+    .channel(`${targetSchema}:erom_bookings`)
     .on(
       'postgres_changes',
-      { event: '*', schema: 'public', table: 'erom_bookings' },
+      { event: '*', schema: targetSchema, table: 'erom_bookings' },
       async (payload) => {
         const record = payload.new || payload.old;
         const recordId = resolveRecordId(record);
@@ -147,11 +158,16 @@ export async function getSupabaseClient() {
       const env = (typeof window !== 'undefined' && window.__ENV) ? window.__ENV : {};
       const url = String(env.SUPABASE_URL || '').trim();
       const key = String(env.SUPABASE_ANON_KEY || '').trim();
+      const schema = getActiveSchema();
       if (!url || !key) {
         throw new Error('Supabase configuration credentials missing');
       }
       const createClient = await resolveCreateClient();
-      supabaseClientInstance = createClient(url, key);
+      supabaseClientInstance = createClient(url, key, {
+        db: {
+          schema
+        }
+      });
       return supabaseClientInstance;
     } finally {
       clientInitPromise = null;

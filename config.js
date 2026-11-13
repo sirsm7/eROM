@@ -38,11 +38,16 @@ window.ENV_READY = (async function initializeConfig() {
     const resolvedConfig = {
       SUPABASE_URL: String(data.SUPABASE_URL || '').trim(),
       SUPABASE_ANON_KEY: String(data.SUPABASE_ANON_KEY || '').trim(),
+      SUPABASE_SCHEMA: String(data.SUPABASE_SCHEMA || 'erom_ag').trim() || 'erom_ag',
       GAS_ENDPOINT_URL: String(data.GAS_ENDPOINT_URL || '').trim()
     };
 
     if (!resolvedConfig.SUPABASE_URL || !resolvedConfig.SUPABASE_ANON_KEY) {
       throw new Error('Missing required SUPABASE_URL or SUPABASE_ANON_KEY configuration.');
+    }
+
+    if (resolvedConfig.SUPABASE_SCHEMA.toLowerCase() === 'public') {
+      throw new Error('Invalid SUPABASE_SCHEMA configuration. Public schema is disallowed.');
     }
 
     try {
@@ -60,6 +65,7 @@ window.ENV_READY = (async function initializeConfig() {
     window.__ENV = Object.freeze({
       SUPABASE_URL: '',
       SUPABASE_ANON_KEY: '',
+      SUPABASE_SCHEMA: 'erom_ag',
       GAS_ENDPOINT_URL: ''
     });
 

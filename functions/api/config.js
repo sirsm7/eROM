@@ -8,6 +8,7 @@ export async function onRequestGet(context) {
     const env = (context && context.env) ? context.env : {};
     const supabaseUrl = String(env.SUPABASE_URL || "").trim();
     const supabaseAnonKey = String(env.SUPABASE_ANON_KEY || "").trim();
+    const supabaseSchema = String(env.SUPABASE_SCHEMA || "erom_ag").trim() || "erom_ag";
     const gasEndpointUrl = String(env.GAS_ENDPOINT_URL || "").trim();
 
     if (!supabaseUrl || !supabaseAnonKey) {
@@ -23,10 +24,24 @@ export async function onRequestGet(context) {
       );
     }
 
+    if (supabaseSchema.toLowerCase() === "public") {
+      return new Response(
+        JSON.stringify({
+          ok: false,
+          error: "Invalid SUPABASE_SCHEMA configuration. Public schema is disallowed."
+        }),
+        {
+          status: 500,
+          headers
+        }
+      );
+    }
+
     return new Response(
       JSON.stringify({
         SUPABASE_URL: supabaseUrl,
         SUPABASE_ANON_KEY: supabaseAnonKey,
+        SUPABASE_SCHEMA: supabaseSchema,
         GAS_ENDPOINT_URL: gasEndpointUrl
       }),
       {

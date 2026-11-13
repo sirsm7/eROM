@@ -1,4 +1,4 @@
-import { getSupabaseClient, resetTimestampRegistry } from './realtime.js';
+import { getSupabaseClient, resetTimestampRegistry, getActiveSchema } from './realtime.js';
 import { clearAllCache } from './idb-cache.js';
 
 export const MIGRATION_APP_NAME = 'eROM@AG';
@@ -395,9 +395,10 @@ export async function exportDatabaseJSON(options = {}) {
   isExportInProgress = true;
 
   try {
+    const targetSchema = getActiveSchema();
     renderMigrationStatus(statusEl, {
       type: 'info',
-      title: 'Menjana Sandaran JSON 1-to-1...',
+      title: `Menjana Sandaran JSON 1-to-1 (${targetSchema})...`,
       message: 'Sedang mengekstrak semua jadual sistem melalui RPC pentadbir.'
     });
 
@@ -440,7 +441,7 @@ export async function exportDatabaseJSON(options = {}) {
         rows
       };
 
-      summaryDetails.push(`${tableName}: ${rows.length} rekod`);
+      summaryDetails.push(`${targetSchema}.${tableName}: ${rows.length} rekod`);
     }
 
     const payload = {
@@ -555,12 +556,13 @@ export async function importDatabaseJSON(file, options = {}) {
     const client = await getSupabaseClient();
     throwIfAborted(controller.signal);
 
+    const targetSchema = getActiveSchema();
     const validatedData = validation.data;
 
     renderMigrationStatus(statusEl, {
       type: 'info',
-      title: 'Memulihkan Data 1-to-1 ke Pangkalan Data...',
-      message: 'Melaksanakan transaksi upsert atomik melalui RPC pentadbir mengikut urutan kunci asing.'
+      title: `Memulihkan Data 1-to-1 ke Skema "${targetSchema}"...`,
+      message: 'Melaksanakan transaksi upsert atomik dan penyelarasan jujukan identiti melalui RPC pentadbir.'
     });
 
     const { data: rpcResponse, error: rpcError } = await client.rpc('fn_admin_import_database_v2', {
@@ -585,7 +587,7 @@ export async function importDatabaseJSON(file, options = {}) {
       const tableName = validatedData.metadata.table_order[i];
       const fallbackCount = validatedData.tables[tableName].rows.length;
       const restoredCount = typeof counts[tableName] === 'number' ? counts[tableName] : fallbackCount;
-      summaryDetails.push(`${tableName}: ${restoredCount} rekod berjaya dipulihkan`);
+      summaryDetails.push(`${targetSchema}.${tableName}: ${restoredCount} rekod berjaya dipulihkan`);
     }
 
     await clearAllCache();
@@ -600,7 +602,7 @@ export async function importDatabaseJSON(file, options = {}) {
 
     renderMigrationStatus(statusEl, {
       type: 'success',
-      title: 'Pemulihan / Migrasi 1-to-1 Selesai',
+      title: `Pemulihan / Migrasi 1-to-1 Selesai (${targetSchema})`,
       message: 'Semua rekod telah disegerakkan dan cache tempatan telah dikosongkan.',
       details: summaryDetails
     });

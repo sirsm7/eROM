@@ -10,7 +10,7 @@ import {
   importDatabaseJSON,
   abortMigrationOperations,
   renderMigrationStatus
-} from "../../migration.js?v=20261112";
+} from "../../migration.js?v=20261113";
 
 const SHOW_PAST_DAYS = false;
 
