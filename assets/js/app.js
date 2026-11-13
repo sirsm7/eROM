@@ -13,6 +13,7 @@ import {
 } from "../../migration.js?v=20261113";
 
 const SHOW_PAST_DAYS = false;
+const LEGACY_BLOCKED_ADMIN_EMAIL = 'admin@moe.gov.my';
 
 const ROOM_OPTIONS = [
   "PKG Melekek - Bilik Kuliah (25 orang)",
@@ -39,6 +40,32 @@ const toYMD = d => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDat
 const firstDay = (y, m) => `${y}-${pad2(m)}-01`;
 const lastDay = (y, m) => toYMD(new Date(y, m, 0));
 const todayYMD = () => toYMD(new Date());
+
+function isLegacyBlockedEmail(email) {
+  return String(email || '').trim().toLowerCase() === LEGACY_BLOCKED_ADMIN_EMAIL;
+}
+
+function isAdminUser(user = state.user) {
+  return Boolean(user && (user.role === 'ADMIN' || user.role === 'SUPER ADMIN'));
+}
+
+function isSuperAdminUser(user = state.user) {
+  return Boolean(user && user.role === 'SUPER ADMIN');
+}
+
+function buildSuperAdminProfile(authUser) {
+  const email = String((authUser && authUser.email) || '').trim();
+  const meta = (authUser && authUser.user_metadata) || {};
+  const rawName = meta.nama || meta.full_name || meta.name || (email ? email.split('@')[0] : 'SUPER ADMIN');
+  const rawSektor = meta.sektor || 'PENTADBIR SISTEM';
+  return {
+    id: authUser.id,
+    nama: String(rawName).trim(),
+    sektor: String(rawSektor).trim(),
+    email,
+    role: 'SUPER ADMIN'
+  };
+}
 
 function parseLocalYMD(ymd) {
   const parts = String(ymd || '').split('-').map(Number);
@@ -463,6 +490,8 @@ async function clearActiveCaches() {
 const DEFAULT_USER_STATE = {
   user: null,
   isAdmin: false,
+  isSuperAdmin: false,
+  authMode: null,
   sessionToken: null,
   sessionExpiresAt: null
 };
@@ -497,6 +526,7 @@ let adminState = {
 let supaClient = null;
 let isBootstrapped = false;
 let isBookingSubmitting = false;
+let authStateSubscription = null;
 let adminSearchAbortController = null;
 let adminBookingListAbortController = null;
 let adminUserListAbortController = null;
@@ -537,7 +567,8 @@ async function bootstrap() {
     return;
   }
 
-  restoreSession();
+  await restoreSession();
+  setupAuthStateListener();
   clearExpiredCache().catch(() => {});
 
   const roomSel = $('roomSelect');
@@ -562,6 +593,34 @@ async function bootstrap() {
   toggleCalendarHint();
   setupRealtimeSubscription();
   await loadOverview(true);
+}
+
+function setupAuthStateListener() {
+  if (!supaClient || !supaClient.auth || typeof supaClient.auth.onAuthStateChange !== 'function') {
+    return;
+  }
+  if (authStateSubscription && typeof authStateSubscription.unsubscribe === 'function') {
+    authStateSubscription.unsubscribe();
+    authStateSubscription = null;
+  }
+
+  const { data } = supaClient.auth.onAuthStateChange((event, session) => {
+    if (session && session.user && !isLegacyBlockedEmail(session.user.email)) {
+      if (event === 'TOKEN_REFRESHED' || event === 'SIGNED_IN' || event === 'USER_UPDATED') {
+        state.user = buildSuperAdminProfile(session.user);
+        state.authMode = 'SUPABASE_AUTH';
+        state.sessionToken = session.access_token || null;
+        state.sessionExpiresAt = session.expires_at ? new Date(session.expires_at * 1000).toISOString() : null;
+        localStorage.setItem('erom_user', JSON.stringify(state.user));
+        if (state.sessionToken) localStorage.setItem('erom_session_token', state.sessionToken);
+        if (state.sessionExpiresAt) localStorage.setItem('erom_session_expires_at', state.sessionExpiresAt);
+      }
+    }
+  });
+
+  if (data && data.subscription) {
+    authStateSubscription = data.subscription;
+  }
 }
 
 async function syncAllActiveViews() {
@@ -768,7 +827,7 @@ function setupUI() {
 async function handleAdminExportJson() {
   const statusEl = $('migrationStatusArea');
 
-  if (!state.user || state.user.role !== 'ADMIN') {
+  if (!isAdminUser()) {
     const msg = 'Akses ditolak. Hanya Pentadbir dibenarkan.';
     renderMigrationStatus(statusEl, { type: 'error', title: 'Akses Ditolak', message: msg });
     return toastErr(msg);
@@ -810,7 +869,7 @@ async function handleAdminExportJson() {
 async function handleAdminImportJson() {
   const statusEl = $('migrationStatusArea');
 
-  if (!state.user || state.user.role !== 'ADMIN') {
+  if (!isAdminUser()) {
     const msg = 'Akses ditolak. Hanya Pentadbir dibenarkan.';
     renderMigrationStatus(statusEl, { type: 'error', title: 'Akses Ditolak', message: msg });
     return toastErr(msg);
@@ -898,7 +957,7 @@ function resetUI() {
   clearElementChildren($('adminList'));
   adminState.bookings = [];
 
-  if (!state.user || state.user.role !== 'ADMIN') {
+  if (!isAdminUser()) {
     const adminLoginBox = $('adminLoginBox');
     if (adminLoginBox) adminLoginBox.style.display = 'block';
     const adminPanel = $('adminPanel');
@@ -1011,7 +1070,7 @@ function switchTab(name) {
   document.querySelectorAll('.tabpane').forEach(p => p.classList.toggle('active', p.id === targetPaneId));
 
   if (name === 'admin' || name === 'adminSearch') {
-    if (state.user && state.user.role === 'ADMIN') {
+    if (isAdminUser()) {
       if (name === 'admin') {
         const adminLoginBox = $('adminLoginBox');
         if (adminLoginBox) adminLoginBox.style.display = 'none';
@@ -1025,7 +1084,7 @@ function switchTab(name) {
       if (adminLoginBox) adminLoginBox.style.display = 'block';
       const adminPanel = $('adminPanel');
       if (adminPanel) adminPanel.style.display = 'none';
-      if (state.user && state.user.role !== 'ADMIN') {
+      if (state.user && !isAdminUser()) {
         modalAlert('Akses Ditolak', 'Hanya akaun PENTADBIR dibenarkan.');
         switchTab('tempahan');
       }
@@ -1047,22 +1106,50 @@ function getSessionToken() {
   return state.sessionToken || localStorage.getItem('erom_session_token') || '';
 }
 
-function restoreSession() {
+async function restoreSession() {
+  if (supaClient && supaClient.auth && typeof supaClient.auth.getSession === 'function') {
+    try {
+      const { data: sessionData } = await supaClient.auth.getSession();
+      const session = sessionData && sessionData.session;
+      if (session && session.user) {
+        if (isLegacyBlockedEmail(session.user.email)) {
+          await onLogout();
+          return;
+        }
+        state.user = buildSuperAdminProfile(session.user);
+        state.authMode = 'SUPABASE_AUTH';
+        state.sessionToken = session.access_token || null;
+        state.sessionExpiresAt = session.expires_at ? new Date(session.expires_at * 1000).toISOString() : null;
+        localStorage.setItem('erom_user', JSON.stringify(state.user));
+        if (state.sessionToken) localStorage.setItem('erom_session_token', state.sessionToken);
+        if (state.sessionExpiresAt) localStorage.setItem('erom_session_expires_at', state.sessionExpiresAt);
+        onLoginSuccess();
+        return;
+      }
+    } catch {}
+  }
+
   const saved = localStorage.getItem('erom_user');
   const savedToken = localStorage.getItem('erom_session_token');
   const savedExpiresAt = localStorage.getItem('erom_session_expires_at');
 
   if (saved && savedToken) {
     try {
-      state.user = JSON.parse(saved);
+      const parsedUser = JSON.parse(saved);
+      if (isLegacyBlockedEmail(parsedUser.email) || parsedUser.role === 'SUPER ADMIN') {
+        await onLogout();
+        return;
+      }
+      state.user = parsedUser;
+      state.authMode = 'LEGACY_RPC';
       state.sessionToken = savedToken;
       state.sessionExpiresAt = savedExpiresAt;
       onLoginSuccess();
     } catch {
-      onLogout();
+      await onLogout();
     }
   } else {
-    onLogout();
+    await onLogout();
   }
 }
 
@@ -1096,7 +1183,37 @@ async function showLoginModal() {
   const { email, pass } = formValues;
   if (!supaClient) return toastErr('Perkhidmatan belum bersedia.');
 
+  if (isLegacyBlockedEmail(email)) {
+    return modalAlert('Akses Ditolak', 'Akaun admin@moe.gov.my telah dinyahaktifkan.');
+  }
+
   modalLoading('Mengesahkan...');
+
+  if (supaClient.auth && typeof supaClient.auth.signInWithPassword === 'function') {
+    const { data: authData, error: authError } = await supaClient.auth.signInWithPassword({
+      email: email.trim(),
+      password: pass
+    });
+
+    if (!authError && authData && authData.session && authData.user) {
+      modalClose();
+      state.user = buildSuperAdminProfile(authData.user);
+      state.authMode = 'SUPABASE_AUTH';
+      state.sessionToken = authData.session.access_token || null;
+      state.sessionExpiresAt = authData.session.expires_at
+        ? new Date(authData.session.expires_at * 1000).toISOString()
+        : null;
+
+      localStorage.setItem('erom_user', JSON.stringify(state.user));
+      if (state.sessionToken) localStorage.setItem('erom_session_token', state.sessionToken);
+      if (state.sessionExpiresAt) localStorage.setItem('erom_session_expires_at', state.sessionExpiresAt);
+
+      onLoginSuccess();
+      toastOk(`Selamat datang, ${state.user.nama} (SUPER ADMIN)`);
+      return;
+    }
+  }
+
   const { data, error } = await supaClient.rpc('fn_login_secure', { p_email: email, p_password: pass });
   modalClose();
 
@@ -1104,6 +1221,7 @@ async function showLoginModal() {
   if (!data || !data.ok) return modalAlert('Gagal', (data && data.error) || 'Log masuk gagal.');
 
   state.user = data.user;
+  state.authMode = 'LEGACY_RPC';
   state.sessionToken = data.session_token || null;
   state.sessionExpiresAt = data.session_expires_at || null;
 
@@ -1132,10 +1250,11 @@ function onLoginSuccess() {
   const roleTag = $('userRoleTag');
   if (roleTag) {
     roleTag.textContent = state.user.role;
-    roleTag.className = `user-role ${state.user.role === 'ADMIN' ? 'admin' : ''}`;
+    roleTag.className = `user-role ${isAdminUser() ? 'admin' : ''}`;
   }
 
-  state.isAdmin = (state.user.role === 'ADMIN');
+  state.isAdmin = isAdminUser();
+  state.isSuperAdmin = isSuperAdminUser();
 
   const btnMyBookings = $('tabTempahanSayaBtn');
   if (btnMyBookings) btnMyBookings.style.display = 'inline-block';
@@ -1170,6 +1289,7 @@ function onLoginSuccess() {
 
 async function onLogout() {
   const currentSessionToken = getSessionToken();
+  const previousAuthMode = state.authMode;
 
   if (adminSearchAbortController) {
     adminSearchAbortController.abort();
@@ -1185,7 +1305,13 @@ async function onLogout() {
   }
   abortMigrationOperations();
 
-  if (currentSessionToken && supaClient) {
+  if (supaClient && supaClient.auth && typeof supaClient.auth.signOut === 'function') {
+    try {
+      await supaClient.auth.signOut();
+    } catch {}
+  }
+
+  if (previousAuthMode !== 'SUPABASE_AUTH' && currentSessionToken && supaClient) {
     try {
       await supaClient.rpc('fn_logout_secure', { p_session_token: currentSessionToken });
     } catch {}
@@ -1361,6 +1487,43 @@ async function changeOwnPassword() {
 
   if (!form) return;
   if (!supaClient) return toastErr('Perkhidmatan tidak tersedia.');
+
+  if (state.authMode === 'SUPABASE_AUTH' && supaClient.auth) {
+    if (!form.newP || form.newP.trim().length < 6) {
+      return modalAlert('Gagal', 'Kata laluan baharu mesti sekurang-kurangnya 6 aksara.');
+    }
+
+    modalLoading('Mengemaskini...');
+    const { error: verifyErr } = await supaClient.auth.signInWithPassword({
+      email: state.user.email,
+      password: form.oldP
+    });
+
+    if (verifyErr) {
+      modalClose();
+      return modalAlert('Gagal', 'Kata laluan lama tidak tepat.');
+    }
+
+    const { data: updatedData, error: updateErr } = await supaClient.auth.updateUser({
+      password: form.newP
+    });
+    modalClose();
+
+    if (updateErr) {
+      return modalAlert('Gagal', updateErr.message || 'Gagal menukar kata laluan.');
+    }
+
+    if (updatedData && updatedData.user) {
+      const { data: latestSession } = await supaClient.auth.getSession();
+      if (latestSession && latestSession.session) {
+        state.sessionToken = latestSession.session.access_token || state.sessionToken;
+        if (state.sessionToken) localStorage.setItem('erom_session_token', state.sessionToken);
+      }
+    }
+
+    await modalAlert('Berjaya', 'Kata laluan Super Admin ditukar.');
+    return;
+  }
 
   modalLoading('Mengemaskini...');
   const { data } = await supaClient.rpc('fn_change_own_password_v2', {
@@ -2003,7 +2166,7 @@ function renderOvTable() {
 
     let canAction = false;
     if (state.user && state.user.role) {
-      if (state.user.role === 'ADMIN') {
+      if (isAdminUser()) {
         canAction = true;
       } else if (state.user.nama === b.nama_penempah) {
         canAction = true;
