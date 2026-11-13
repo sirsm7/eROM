@@ -52,7 +52,7 @@ h1 {
 .header-logo {
   height: 48px;
   width: auto;
-  filter: drop-shadow(0 2px 4px rgba(0,0,0,0.2));
+  filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.2));
   flex-shrink: 0;
 }
 
@@ -167,6 +167,8 @@ label.small {
 select,
 input[type="time"],
 input[type="text"],
+input[type="email"],
+input[type="password"],
 input[type="date"],
 input[type="file"],
 button {
@@ -200,7 +202,7 @@ input:focus {
   cursor: pointer;
   font-weight: 500;
   letter-spacing: 0.5px;
-  box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -229,6 +231,11 @@ input:focus {
 
 .btn.ok {
   background: var(--ok);
+  color: #fff;
+}
+
+.btn.bad {
+  background: var(--bad);
   color: #fff;
 }
 
@@ -389,7 +396,7 @@ input:focus {
 .switch button.active {
   background: #fff;
   color: var(--primary);
-  box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
 }
 
 .counter {
@@ -469,33 +476,158 @@ tr:last-child td {
   display: none;
 }
 
-.swal-form {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 16px;
+dialog.erom-modal {
+  border: 1px solid var(--ring);
+  border-radius: 16px;
+  padding: 0;
+  width: min(92vw, 520px);
+  max-width: 92vw;
+  background: var(--card);
+  color: var(--text);
+  box-shadow: 0 20px 25px -5px rgba(15, 23, 42, 0.25);
+}
+
+dialog.erom-modal.wide {
+  width: min(94vw, 650px);
+}
+
+dialog.erom-modal::backdrop {
+  background: rgba(15, 23, 42, 0.55);
+  backdrop-filter: blur(2px);
+}
+
+.erom-modal-box {
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.erom-modal-title {
+  margin: 0;
+  font-size: 1.2rem;
+  font-weight: 700;
+  color: var(--primary-dark);
+}
+
+.erom-modal-text {
+  margin: 0;
+  font-size: 0.95rem;
+  color: var(--text);
+  line-height: 1.45;
+  white-space: pre-line;
+}
+
+.erom-modal-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
   text-align: left;
 }
 
-.swal-form .full-width {
-  grid-column: 1 / -1;
+.erom-modal-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
 }
 
-.btn-icon {
-  background: #f1f5f9;
-  color: var(--text);
-  width: 36px;
-  height: 36px;
-  min-height: 36px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
+.erom-modal-field input {
+  width: 100%;
+}
+
+.erom-modal-error {
+  background: #fef2f2;
+  color: #991b1b;
+  border: 1px solid #fecaca;
   border-radius: 8px;
-  transition: 0.2s;
+  padding: 8px 12px;
+  font-size: 0.85rem;
+  font-weight: 500;
 }
 
-.btn-icon:hover {
-  background: var(--primary);
+.erom-modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-top: 4px;
+}
+
+.erom-modal-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 55dvh;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.erom-modal-list li {
+  background: #f8fafc;
+  border: 1px solid var(--ring);
+  border-radius: 10px;
+  padding: 10px 12px;
+  font-size: 0.9rem;
+  line-height: 1.45;
+}
+
+.erom-spinner {
+  width: 34px;
+  height: 34px;
+  border: 3px solid #dbeafe;
+  border-top-color: var(--primary);
+  border-radius: 50%;
+  animation: spin 0.75s linear infinite;
+  margin: 4px auto;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+#eromToastContainer {
+  position: fixed;
+  top: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 9999;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: min(92vw, 420px);
+  pointer-events: none;
+}
+
+.erom-toast {
+  background: var(--text);
   color: #fff;
+  padding: 12px 16px;
+  border-radius: 12px;
+  font-size: 0.92rem;
+  font-weight: 500;
+  box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.2);
+  border-left: 5px solid var(--accent);
+  animation: fadeIn 0.2s ease;
+}
+
+.erom-toast.success {
+  border-left-color: var(--ok);
+}
+
+.erom-toast.warning {
+  border-left-color: var(--warn);
+}
+
+.erom-toast.error {
+  border-left-color: var(--bad);
+}
+
+.erom-toast.info {
+  border-left-color: var(--accent);
 }
 
 .header-flex-container {
@@ -529,7 +661,7 @@ tr:last-child td {
   cursor: pointer;
   font-family: 'Oswald', sans-serif;
   font-size: 0.9rem;
-  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
   transition: transform 0.1s;
 }
 
@@ -541,11 +673,11 @@ tr:last-child td {
   display: none;
   align-items: center;
   gap: 8px;
-  background: rgba(255,255,255,0.15);
+  background: rgba(255, 255, 255, 0.15);
   padding: 6px 14px;
   min-height: 44px;
   border-radius: 50px;
-  border: 1px solid rgba(255,255,255,0.2);
+  border: 1px solid rgba(255, 255, 255, 0.2);
   cursor: pointer;
   color: #fff;
   font-size: 0.9rem;
@@ -557,7 +689,7 @@ tr:last-child td {
 
 .user-role {
   font-size: 0.7rem;
-  background: rgba(0,0,0,0.3);
+  background: rgba(0, 0, 0, 0.3);
   padding: 2px 6px;
   border-radius: 4px;
   text-transform: uppercase;
@@ -630,11 +762,6 @@ tr:last-child td {
   border-color: var(--primary);
 }
 
-.swal-wide-popup {
-  max-width: 650px !important;
-  width: 90% !important;
-}
-
 @media (max-width: 768px) {
   .wrap {
     margin: 0;
@@ -666,7 +793,7 @@ tr:last-child td {
     border-radius: 12px;
     margin: 0 10px 16px 10px;
     padding: 16px;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
   }
 
   .tabs {
@@ -771,7 +898,7 @@ tr:last-child td {
     border: 1px solid var(--ring);
     border-radius: 12px;
     background: #fff;
-    box-shadow: 0 2px 5px rgba(0,0,0,0.05);
+    box-shadow: 0 2px 5px rgba(0, 0, 0, 0.05);
     overflow: hidden;
   }
 
@@ -833,8 +960,8 @@ tr:last-child td {
   #adminSearchTableBody td:nth-of-type(6)::before { content: "Penempah"; }
   #adminSearchTableBody td:nth-of-type(7)::before { content: "Tindakan"; }
 
-  .swal-form {
-    grid-template-columns: 1fr;
+  .erom-modal-actions {
+    flex-direction: column-reverse;
   }
 
   .header-flex-container {

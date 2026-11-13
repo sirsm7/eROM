@@ -1,4 +1,4 @@
-import { getSupabaseClient } from './realtime.js';
+import { getSupabaseClient, resetTimestampRegistry } from './realtime.js';
 import { clearAllCache } from './idb-cache.js';
 
 export const MIGRATION_APP_NAME = 'eROM@AG';
@@ -60,6 +60,7 @@ let isExportInProgress = false;
 let isImportInProgress = false;
 let activeAbortController = null;
 let activeDownloadObjectUrl = null;
+let unloadListenerBound = false;
 
 function isPlainObject(value) {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
@@ -93,6 +94,14 @@ function revokeActiveDownloadUrl() {
     } catch {}
     activeDownloadObjectUrl = null;
   }
+}
+
+function bindUnloadCleanup() {
+  if (unloadListenerBound || typeof window === 'undefined') {
+    return;
+  }
+  window.addEventListener('beforeunload', revokeActiveDownloadUrl);
+  unloadListenerBound = true;
 }
 
 export function isMigrationBusy() {
@@ -342,6 +351,7 @@ export function validateMigrationPayload(payload) {
 }
 
 function triggerJsonDownload(jsonContent, filename) {
+  bindUnloadCleanup();
   revokeActiveDownloadUrl();
 
   const blob = new Blob([jsonContent], { type: 'application/json;charset=utf-8' });
@@ -355,7 +365,12 @@ function triggerJsonDownload(jsonContent, filename) {
   anchor.style.display = 'none';
   document.body.appendChild(anchor);
   anchor.click();
-  document.body.removeChild(anchor);
+
+  setTimeout(() => {
+    if (anchor.parentNode) {
+      anchor.parentNode.removeChild(anchor);
+    }
+  }, 0);
 
   return objectUrl;
 }
@@ -574,6 +589,7 @@ export async function importDatabaseJSON(file, options = {}) {
     }
 
     await clearAllCache();
+    resetTimestampRegistry();
 
     if (typeof options.onComplete === 'function') {
       await options.onComplete({

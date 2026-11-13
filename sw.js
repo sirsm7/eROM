@@ -1,4 +1,4 @@
-const CACHE_NAME = 'erom-ag-v15';
+const CACHE_NAME = 'erom-ag-v16';
 const ASSETS_TO_CACHE = [
   './',
   './index.html',
@@ -60,7 +60,7 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  if (url.pathname.startsWith('/api/')) {
+  if (url.pathname.startsWith('/api/') || url.pathname.endsWith('/sw.js')) {
     return;
   }
 
@@ -98,7 +98,10 @@ self.addEventListener('fetch', (event) => {
         }
         return new Response('Offline', {
           status: 503,
-          statusText: 'Service Unavailable'
+          statusText: 'Service Unavailable',
+          headers: {
+            'Content-Type': 'text/plain; charset=utf-8'
+          }
         });
       })
   );

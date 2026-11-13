@@ -1,11 +1,11 @@
 const DB_NAME = 'erom_db';
-const DB_VERSION = 2;
+const DB_VERSION = 3;
 const STORE_NAME = 'cache_store';
 
 let dbInstance = null;
 let openPromise = null;
 
-if (typeof window !== 'undefined' && !window.__memoryCache) {
+if (typeof window !== 'undefined' && !(window.__memoryCache instanceof Map)) {
   window.__memoryCache = new Map();
 }
 
@@ -21,7 +21,7 @@ function isValidCacheRecord(item) {
 }
 
 function getMemoryEntry(key) {
-  if (typeof window === 'undefined' || !window.__memoryCache || !window.__memoryCache.has(key)) {
+  if (typeof window === 'undefined' || !(window.__memoryCache instanceof Map) || !window.__memoryCache.has(key)) {
     return null;
   }
   const item = window.__memoryCache.get(key);
@@ -109,7 +109,7 @@ export async function setCache(key, data, ttlSeconds = 300) {
 
   const db = await openDB();
   if (!db) {
-    if (typeof window !== 'undefined' && window.__memoryCache) {
+    if (typeof window !== 'undefined' && window.__memoryCache instanceof Map) {
       window.__memoryCache.set(record.cache_key, record);
       return true;
     }
@@ -117,29 +117,32 @@ export async function setCache(key, data, ttlSeconds = 300) {
   }
 
   return new Promise((resolve) => {
+    let settled = false;
+    const finish = (ok) => {
+      if (settled) return;
+      settled = true;
+      if (ok) {
+        if (typeof window !== 'undefined' && window.__memoryCache instanceof Map) {
+          window.__memoryCache.delete(record.cache_key);
+        }
+      } else if (typeof window !== 'undefined' && window.__memoryCache instanceof Map) {
+        window.__memoryCache.set(record.cache_key, record);
+      }
+      resolve(ok);
+    };
+
     try {
       const tx = db.transaction(STORE_NAME, 'readwrite');
       const store = tx.objectStore(STORE_NAME);
       const req = store.put(record);
 
-      req.onsuccess = () => {
-        if (typeof window !== 'undefined' && window.__memoryCache) {
-          window.__memoryCache.delete(record.cache_key);
-        }
-        resolve(true);
-      };
-      req.onerror = () => {
-        if (typeof window !== 'undefined' && window.__memoryCache) {
-          window.__memoryCache.set(record.cache_key, record);
-        }
-        resolve(false);
-      };
+      tx.oncomplete = () => finish(true);
+      tx.onerror = () => finish(false);
+      tx.onabort = () => finish(false);
+      req.onerror = () => finish(false);
     } catch {
       dbInstance = null;
-      if (typeof window !== 'undefined' && window.__memoryCache) {
-        window.__memoryCache.set(record.cache_key, record);
-      }
-      resolve(false);
+      finish(false);
     }
   });
 }
@@ -152,6 +155,13 @@ export async function getCacheEntry(key) {
   }
 
   return new Promise((resolve) => {
+    let settled = false;
+    const finish = (val) => {
+      if (settled) return;
+      settled = true;
+      resolve(val);
+    };
+
     try {
       const tx = db.transaction(STORE_NAME, 'readonly');
       const store = tx.objectStore(STORE_NAME);
@@ -160,28 +170,28 @@ export async function getCacheEntry(key) {
       req.onsuccess = () => {
         const item = req.result;
         if (!item) {
-          return resolve(getMemoryEntry(normalizedKey));
+          return finish(getMemoryEntry(normalizedKey));
         }
 
         if (!isValidCacheRecord(item)) {
           deleteCache(normalizedKey).catch(() => {});
-          return resolve(null);
+          return finish(null);
         }
 
         const age = Date.now() - item.timestamp;
-        resolve({
+        finish({
           data: item.data,
           isStale: age > (item.ttl || 0),
           timestamp: item.timestamp
         });
       };
 
-      req.onerror = () => {
-        resolve(getMemoryEntry(normalizedKey));
-      };
+      req.onerror = () => finish(getMemoryEntry(normalizedKey));
+      tx.onerror = () => finish(getMemoryEntry(normalizedKey));
+      tx.onabort = () => finish(getMemoryEntry(normalizedKey));
     } catch {
       dbInstance = null;
-      resolve(getMemoryEntry(normalizedKey));
+      finish(getMemoryEntry(normalizedKey));
     }
   });
 }
@@ -194,7 +204,7 @@ export async function getCache(key) {
 
 export async function deleteCache(key) {
   const normalizedKey = String(key);
-  if (typeof window !== 'undefined' && window.__memoryCache) {
+  if (typeof window !== 'undefined' && window.__memoryCache instanceof Map) {
     window.__memoryCache.delete(normalizedKey);
   }
 
@@ -202,25 +212,37 @@ export async function deleteCache(key) {
   if (!db) return true;
 
   return new Promise((resolve) => {
+    let settled = false;
+    const finish = (ok) => {
+      if (settled) return;
+      settled = true;
+      resolve(ok);
+    };
+
     try {
       const tx = db.transaction(STORE_NAME, 'readwrite');
       const store = tx.objectStore(STORE_NAME);
       const req = store.delete(normalizedKey);
 
-      req.onsuccess = () => resolve(true);
-      req.onerror = () => resolve(false);
+      tx.oncomplete = () => finish(true);
+      tx.onerror = () => finish(false);
+      tx.onabort = () => finish(false);
+      req.onerror = () => finish(false);
     } catch {
       dbInstance = null;
-      resolve(false);
+      finish(false);
     }
   });
 }
 
 export async function deleteCacheByPrefix(prefix) {
+  if (prefix === undefined || prefix === null) return 0;
   const normalizedPrefix = String(prefix);
+  if (!normalizedPrefix) return 0;
+
   let memoryDeleted = 0;
 
-  if (typeof window !== 'undefined' && window.__memoryCache) {
+  if (typeof window !== 'undefined' && window.__memoryCache instanceof Map) {
     for (const k of window.__memoryCache.keys()) {
       if (typeof k === 'string' && k.startsWith(normalizedPrefix)) {
         window.__memoryCache.delete(k);
@@ -233,11 +255,18 @@ export async function deleteCacheByPrefix(prefix) {
   if (!db) return memoryDeleted;
 
   return new Promise((resolve) => {
+    let settled = false;
+    let deletedCount = 0;
+    const finish = (count) => {
+      if (settled) return;
+      settled = true;
+      resolve(count);
+    };
+
     try {
       const tx = db.transaction(STORE_NAME, 'readwrite');
       const store = tx.objectStore(STORE_NAME);
       const req = store.openCursor();
-      let deletedCount = 0;
 
       req.onsuccess = (e) => {
         const cursor = e.target.result;
@@ -247,15 +276,16 @@ export async function deleteCacheByPrefix(prefix) {
             deletedCount++;
           }
           cursor.continue();
-        } else {
-          resolve(deletedCount + memoryDeleted);
         }
       };
 
-      req.onerror = () => resolve(memoryDeleted);
+      tx.oncomplete = () => finish(deletedCount + memoryDeleted);
+      tx.onerror = () => finish(memoryDeleted);
+      tx.onabort = () => finish(memoryDeleted);
+      req.onerror = () => finish(memoryDeleted);
     } catch {
       dbInstance = null;
-      resolve(memoryDeleted);
+      finish(memoryDeleted);
     }
   });
 }
@@ -264,9 +294,9 @@ export async function clearExpiredCache() {
   const now = Date.now();
   let purgedMemory = 0;
 
-  if (typeof window !== 'undefined' && window.__memoryCache) {
+  if (typeof window !== 'undefined' && window.__memoryCache instanceof Map) {
     for (const [k, v] of window.__memoryCache.entries()) {
-      if (!isValidCacheRecord(v) || (v.ttl && now - v.timestamp > v.ttl)) {
+      if (!isValidCacheRecord(v) || (typeof v.ttl === 'number' && now - v.timestamp > v.ttl)) {
         window.__memoryCache.delete(k);
         purgedMemory++;
       }
@@ -277,36 +307,44 @@ export async function clearExpiredCache() {
   if (!db) return purgedMemory;
 
   return new Promise((resolve) => {
+    let settled = false;
+    let purgedCount = 0;
+    const finish = (count) => {
+      if (settled) return;
+      settled = true;
+      resolve(count);
+    };
+
     try {
       const tx = db.transaction(STORE_NAME, 'readwrite');
       const store = tx.objectStore(STORE_NAME);
       const req = store.openCursor();
-      let purgedCount = 0;
 
       req.onsuccess = (e) => {
         const cursor = e.target.result;
         if (cursor) {
           const item = cursor.value;
-          if (!isValidCacheRecord(item) || (item.ttl && now - item.timestamp > item.ttl)) {
+          if (!isValidCacheRecord(item) || (typeof item.ttl === 'number' && now - item.timestamp > item.ttl)) {
             cursor.delete();
             purgedCount++;
           }
           cursor.continue();
-        } else {
-          resolve(purgedCount + purgedMemory);
         }
       };
 
-      req.onerror = () => resolve(purgedMemory);
+      tx.oncomplete = () => finish(purgedCount + purgedMemory);
+      tx.onerror = () => finish(purgedMemory);
+      tx.onabort = () => finish(purgedMemory);
+      req.onerror = () => finish(purgedMemory);
     } catch {
       dbInstance = null;
-      resolve(purgedMemory);
+      finish(purgedMemory);
     }
   });
 }
 
 export async function clearAllCache() {
-  if (typeof window !== 'undefined' && window.__memoryCache) {
+  if (typeof window !== 'undefined' && window.__memoryCache instanceof Map) {
     window.__memoryCache.clear();
   }
 
@@ -314,16 +352,25 @@ export async function clearAllCache() {
   if (!db) return true;
 
   return new Promise((resolve) => {
+    let settled = false;
+    const finish = (ok) => {
+      if (settled) return;
+      settled = true;
+      resolve(ok);
+    };
+
     try {
       const tx = db.transaction(STORE_NAME, 'readwrite');
       const store = tx.objectStore(STORE_NAME);
       const req = store.clear();
 
-      req.onsuccess = () => resolve(true);
-      req.onerror = () => resolve(false);
+      tx.oncomplete = () => finish(true);
+      tx.onerror = () => finish(false);
+      tx.onabort = () => finish(false);
+      req.onerror = () => finish(false);
     } catch {
       dbInstance = null;
-      resolve(false);
+      finish(false);
     }
   });
 }

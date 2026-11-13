@@ -76,93 +76,10 @@ const toMinutes = t => {
   return (h * 60) + (m || 0);
 };
 
-function escapeHtml(s) {
-  return String(s ?? '').replace(/[&<>"']/g, m => ({
-    '&': '&amp;',
-    '<': '&lt;',
-    '>': '&gt;',
-    '"': '&quot;',
-    "'": '&#39;'
-  }[m]));
-}
-
 function addDaysYMD(ymd, n) {
   const dt = parseLocalYMD(ymd);
   dt.setDate(dt.getDate() + n);
   return toYMD(dt);
-}
-
-function isSwalAvailable() {
-  return typeof Swal !== 'undefined' && Swal !== null && typeof Swal.fire === 'function';
-}
-
-let cachedToast = null;
-function getToast() {
-  if (!cachedToast && isSwalAvailable() && typeof Swal.mixin === 'function') {
-    cachedToast = Swal.mixin({
-      toast: true,
-      position: 'top',
-      showConfirmButton: false,
-      timer: 2200,
-      timerProgressBar: true
-    });
-  }
-  return cachedToast;
-}
-
-function toastOk(t) {
-  const toast = getToast();
-  if (toast) toast.fire({ icon: 'success', title: t });
-}
-
-function toastInfo(t) {
-  const toast = getToast();
-  if (toast) toast.fire({ icon: 'info', title: t });
-}
-
-function toastWarn(t) {
-  const toast = getToast();
-  if (toast) {
-    toast.fire({ icon: 'warning', title: t });
-  } else if (typeof window !== 'undefined' && typeof window.alert === 'function') {
-    window.alert(t);
-  }
-}
-
-function toastErr(t) {
-  const toast = getToast();
-  if (toast) {
-    toast.fire({ icon: 'error', title: t });
-  } else if (typeof window !== 'undefined' && typeof window.alert === 'function') {
-    window.alert(t);
-  }
-}
-
-function modalLoading(title = 'Memproses...') {
-  if (isSwalAvailable()) {
-    Swal.fire({
-      title,
-      allowOutsideClick: false,
-      didOpen: () => {
-        if (typeof Swal.showLoading === 'function') {
-          Swal.showLoading();
-        }
-      }
-    });
-  }
-}
-
-function modalClose() {
-  if (isSwalAvailable() && typeof Swal.close === 'function') {
-    Swal.close();
-  }
-}
-
-function markInvalid(el) {
-  if (!el) return;
-  el.classList.add('invalid');
-  setTimeout(() => el.classList.remove('invalid'), 1200);
-  el.focus();
 }
 
 function createEl(tag, cls) {
@@ -178,21 +95,361 @@ function clearElementChildren(el) {
   }
 }
 
-async function modalConfirm(title, text, confirmText = 'Ya, Teruskan') {
-  if (isSwalAvailable()) {
-    const result = await Swal.fire({
-      title: title,
-      text: text,
-      icon: 'question',
-      showCancelButton: true,
-      confirmButtonColor: '#3085d6',
-      cancelButtonColor: '#d33',
-      confirmButtonText: confirmText,
-      cancelButtonText: 'Batal'
-    });
-    return result.isConfirmed;
+function ensureToastContainer() {
+  let container = $('eromToastContainer');
+  if (!container && typeof document !== 'undefined' && document.body) {
+    container = document.createElement('div');
+    container.id = 'eromToastContainer';
+    container.setAttribute('aria-live', 'polite');
+    document.body.appendChild(container);
   }
-  return window.confirm(`${title}\n${text}`);
+  return container;
+}
+
+function showToast(message, type = 'info', duration = 2600) {
+  const container = ensureToastContainer();
+  if (!container) return;
+
+  const toast = createEl('div', `erom-toast ${type}`);
+  toast.textContent = String(message ?? '');
+  container.appendChild(toast);
+
+  setTimeout(() => {
+    if (toast.parentNode) {
+      toast.parentNode.removeChild(toast);
+    }
+  }, duration);
+}
+
+function toastOk(t) {
+  showToast(t, 'success');
+}
+
+function toastInfo(t) {
+  showToast(t, 'info');
+}
+
+function toastWarn(t) {
+  showToast(t, 'warning', 3200);
+}
+
+function toastErr(t) {
+  showToast(t, 'error', 3600);
+}
+
+let activeDialogEl = null;
+
+function closeDialogElement(dialog) {
+  if (!dialog) return;
+  try {
+    if (dialog.open && typeof dialog.close === 'function') {
+      dialog.close();
+    }
+  } catch {}
+  if (dialog.parentNode) {
+    dialog.parentNode.removeChild(dialog);
+  }
+  if (activeDialogEl === dialog) {
+    activeDialogEl = null;
+  }
+}
+
+function modalClose() {
+  if (activeDialogEl) {
+    closeDialogElement(activeDialogEl);
+  }
+}
+
+function createBaseDialog(wide = false) {
+  modalClose();
+  const dialog = createEl('dialog', wide ? 'erom-modal wide' : 'erom-modal');
+  const box = createEl('div', 'erom-modal-box');
+  dialog.appendChild(box);
+  document.body.appendChild(dialog);
+  activeDialogEl = dialog;
+  return { dialog, box };
+}
+
+function openDialog(dialog) {
+  if (typeof dialog.showModal === 'function') {
+    dialog.showModal();
+  } else {
+    dialog.setAttribute('open', 'open');
+  }
+}
+
+function modalLoading(title = 'Memproses...') {
+  if (typeof document === 'undefined' || !document.body) return;
+  const { dialog, box } = createBaseDialog(false);
+
+  const spinner = createEl('div', 'erom-spinner');
+  spinner.setAttribute('aria-hidden', 'true');
+  box.appendChild(spinner);
+
+  const titleEl = createEl('h3', 'erom-modal-title');
+  titleEl.style.textAlign = 'center';
+  titleEl.textContent = title;
+  box.appendChild(titleEl);
+
+  dialog.addEventListener('cancel', (e) => {
+    e.preventDefault();
+  });
+
+  openDialog(dialog);
+}
+
+function modalAlert(title, text) {
+  if (typeof document === 'undefined' || !document.body) {
+    return Promise.resolve();
+  }
+
+  return new Promise((resolve) => {
+    const { dialog, box } = createBaseDialog(false);
+
+    const titleEl = createEl('h3', 'erom-modal-title');
+    titleEl.textContent = title;
+    box.appendChild(titleEl);
+
+    if (text) {
+      const textEl = createEl('p', 'erom-modal-text');
+      textEl.textContent = text;
+      box.appendChild(textEl);
+    }
+
+    const actions = createEl('div', 'erom-modal-actions');
+    const okBtn = createEl('button', 'btn');
+    okBtn.type = 'button';
+    okBtn.textContent = 'Tutup';
+    actions.appendChild(okBtn);
+    box.appendChild(actions);
+
+    const done = () => {
+      closeDialogElement(dialog);
+      resolve();
+    };
+
+    okBtn.addEventListener('click', done);
+    dialog.addEventListener('cancel', (e) => {
+      e.preventDefault();
+      done();
+    });
+
+    openDialog(dialog);
+    okBtn.focus();
+  });
+}
+
+function modalConfirm(title, text, confirmText = 'Ya, Teruskan', cancelText = 'Batal', isDanger = false) {
+  if (typeof document === 'undefined' || !document.body) {
+    return Promise.resolve(false);
+  }
+
+  return new Promise((resolve) => {
+    const { dialog, box } = createBaseDialog(false);
+
+    const titleEl = createEl('h3', 'erom-modal-title');
+    titleEl.textContent = title;
+    box.appendChild(titleEl);
+
+    if (text) {
+      const textEl = createEl('p', 'erom-modal-text');
+      textEl.textContent = text;
+      box.appendChild(textEl);
+    }
+
+    const actions = createEl('div', 'erom-modal-actions');
+
+    const cancelBtn = createEl('button', 'btn ghost');
+    cancelBtn.type = 'button';
+    cancelBtn.textContent = cancelText;
+    actions.appendChild(cancelBtn);
+
+    const confirmBtn = createEl('button', isDanger ? 'btn bad' : 'btn');
+    confirmBtn.type = 'button';
+    confirmBtn.textContent = confirmText;
+    actions.appendChild(confirmBtn);
+
+    box.appendChild(actions);
+
+    const done = (result) => {
+      closeDialogElement(dialog);
+      resolve(result);
+    };
+
+    cancelBtn.addEventListener('click', () => done(false));
+    confirmBtn.addEventListener('click', () => done(true));
+    dialog.addEventListener('cancel', (e) => {
+      e.preventDefault();
+      done(false);
+    });
+
+    openDialog(dialog);
+    confirmBtn.focus();
+  });
+}
+
+function modalForm(title, fields, confirmText = 'Simpan', cancelText = 'Batal') {
+  if (typeof document === 'undefined' || !document.body) {
+    return Promise.resolve(null);
+  }
+
+  return new Promise((resolve) => {
+    const { dialog, box } = createBaseDialog(false);
+
+    const titleEl = createEl('h3', 'erom-modal-title');
+    titleEl.textContent = title;
+    box.appendChild(titleEl);
+
+    const formEl = document.createElement('form');
+    formEl.className = 'erom-modal-fields';
+    formEl.noValidate = true;
+
+    const inputMap = {};
+    let firstInput = null;
+
+    fields.forEach((f) => {
+      const wrap = createEl('div', 'erom-modal-field');
+
+      if (f.label) {
+        const lbl = createEl('label', 'small');
+        lbl.setAttribute('for', `modal_field_${f.name}`);
+        lbl.textContent = f.label;
+        wrap.appendChild(lbl);
+      }
+
+      const input = document.createElement('input');
+      input.id = `modal_field_${f.name}`;
+      input.type = f.type || 'text';
+      input.placeholder = f.placeholder || '';
+      input.value = f.value != null ? String(f.value) : '';
+      if (f.required) input.required = true;
+      wrap.appendChild(input);
+
+      inputMap[f.name] = input;
+      if (!firstInput) firstInput = input;
+      formEl.appendChild(wrap);
+    });
+
+    const errorBox = createEl('div', 'erom-modal-error');
+    errorBox.style.display = 'none';
+    formEl.appendChild(errorBox);
+
+    const actions = createEl('div', 'erom-modal-actions');
+
+    const cancelBtn = createEl('button', 'btn ghost');
+    cancelBtn.type = 'button';
+    cancelBtn.textContent = cancelText;
+    actions.appendChild(cancelBtn);
+
+    const submitBtn = createEl('button', 'btn');
+    submitBtn.type = 'submit';
+    submitBtn.textContent = confirmText;
+    actions.appendChild(submitBtn);
+
+    formEl.appendChild(actions);
+    box.appendChild(formEl);
+
+    const done = (result) => {
+      closeDialogElement(dialog);
+      resolve(result);
+    };
+
+    cancelBtn.addEventListener('click', () => done(null));
+    dialog.addEventListener('cancel', (e) => {
+      e.preventDefault();
+      done(null);
+    });
+
+    formEl.addEventListener('submit', (e) => {
+      e.preventDefault();
+      const values = {};
+
+      for (let i = 0; i < fields.length; i++) {
+        const f = fields[i];
+        const el = inputMap[f.name];
+        const val = f.type === 'password' ? el.value : el.value.trim();
+        if (f.required && !val) {
+          errorBox.textContent = f.errorMessage || 'Sila lengkapkan semua ruang yang diperlukan.';
+          errorBox.style.display = 'block';
+          el.focus();
+          return;
+        }
+        values[f.name] = val;
+      }
+
+      done(values);
+    });
+
+    openDialog(dialog);
+    if (firstInput) firstInput.focus();
+  });
+}
+
+function modalBookingList(dateStr, bookings) {
+  if (typeof document === 'undefined' || !document.body) return;
+
+  const { dialog, box } = createBaseDialog(true);
+
+  const titleEl = createEl('h3', 'erom-modal-title');
+  titleEl.textContent = `Senarai Tempahan (${dateStr})`;
+  box.appendChild(titleEl);
+
+  const ul = createEl('ul', 'erom-modal-list');
+  const frag = document.createDocumentFragment();
+
+  bookings.forEach((b) => {
+    const li = document.createElement('li');
+
+    const pMasa = document.createElement('div');
+    const strongMasa = document.createElement('strong');
+    strongMasa.textContent = 'Masa: ';
+    pMasa.appendChild(strongMasa);
+    pMasa.appendChild(document.createTextNode(`${toHHMM(b.masa_mula)} - ${toHHMM(b.masa_tamat)}`));
+
+    const pPenempah = document.createElement('div');
+    const strongPenempah = document.createElement('strong');
+    strongPenempah.textContent = 'Penempah: ';
+    pPenempah.appendChild(strongPenempah);
+    pPenempah.appendChild(document.createTextNode(`${b.nama_penempah} (${b.sektor})`));
+
+    const pTujuan = document.createElement('div');
+    const strongTujuan = document.createElement('strong');
+    strongTujuan.textContent = 'Tujuan: ';
+    pTujuan.appendChild(strongTujuan);
+    pTujuan.appendChild(document.createTextNode(b.tujuan));
+
+    li.appendChild(pMasa);
+    li.appendChild(pPenempah);
+    li.appendChild(pTujuan);
+    frag.appendChild(li);
+  });
+
+  ul.appendChild(frag);
+  box.appendChild(ul);
+
+  const actions = createEl('div', 'erom-modal-actions');
+  const closeBtn = createEl('button', 'btn');
+  closeBtn.type = 'button';
+  closeBtn.textContent = 'Tutup';
+  actions.appendChild(closeBtn);
+  box.appendChild(actions);
+
+  const done = () => closeDialogElement(dialog);
+  closeBtn.addEventListener('click', done);
+  dialog.addEventListener('cancel', (e) => {
+    e.preventDefault();
+    done();
+  });
+
+  openDialog(dialog);
+  closeBtn.focus();
+}
+
+function markInvalid(el) {
+  if (!el) return;
+  el.classList.add('invalid');
+  setTimeout(() => el.classList.remove('invalid'), 1200);
+  el.focus();
 }
 
 async function clearActiveCaches() {
@@ -238,22 +495,37 @@ let adminState = {
 };
 
 let supaClient = null;
+let isBootstrapped = false;
+let isBookingSubmitting = false;
 let adminSearchAbortController = null;
 let adminBookingListAbortController = null;
 let adminUserListAbortController = null;
 
+function registerServiceWorker() {
+  if (typeof navigator !== 'undefined' && 'serviceWorker' in navigator) {
+    navigator.serviceWorker
+      .register('./sw.js', { updateViaCache: 'none' })
+      .then((reg) => {
+        reg.update().catch(() => {});
+      })
+      .catch(() => {});
+  }
+}
+
 window.addEventListener('load', bootstrap);
 
 async function bootstrap() {
+  if (isBootstrapped) return;
+  isBootstrapped = true;
+
+  registerServiceWorker();
   setupUI();
 
   if (window.ENV_READY) {
     try {
       await window.ENV_READY;
     } catch {
-      if (isSwalAvailable()) {
-        Swal.fire('Ralat Konfigurasi', 'Konfigurasi pelayan tidak lengkap. Sila hubungi pentadbir sistem.', 'error');
-      }
+      await modalAlert('Ralat Konfigurasi', 'Konfigurasi pelayan tidak lengkap. Sila hubungi pentadbir sistem.');
       return;
     }
   }
@@ -261,9 +533,7 @@ async function bootstrap() {
   try {
     supaClient = await getSupabaseClient();
   } catch {
-    if (isSwalAvailable()) {
-      Swal.fire('Ralat Permulaan', 'Gagal menyambung ke pangkalan data. Sila muat semula halaman.', 'error');
-    }
+    await modalAlert('Ralat Permulaan', 'Gagal menyambung ke pangkalan data. Sila muat semula halaman.');
     return;
   }
 
@@ -334,13 +604,14 @@ async function handleRealtimePayload(payload) {
 
   const isSelf = state.user && (rec.nama_penempah === state.user.nama || rec.email === state.user.email);
   if (!isSelf) {
+    const roomLabel = rec.bilik || 'Bilik';
     if (payload.eventType === 'INSERT') {
-      toastInfo(`Tempahan baharu diterima: ${escapeHtml(rec.bilik) || 'Bilik'}`);
+      toastInfo(`Tempahan baharu diterima: ${roomLabel}`);
     } else if (payload.eventType === 'UPDATE') {
       if (rec.status === 'DIBATALKAN') {
-        toastInfo(`Tempahan dibatalkan: ${escapeHtml(rec.bilik) || 'Bilik'}`);
+        toastInfo(`Tempahan dibatalkan: ${roomLabel}`);
       } else {
-        toastInfo(`Jadual tempahan dikemaskini: ${escapeHtml(rec.bilik) || 'Bilik'}`);
+        toastInfo(`Jadual tempahan dikemaskini: ${roomLabel}`);
       }
     } else if (payload.eventType === 'DELETE') {
       toastInfo('Rekod tempahan dikeluarkan.');
@@ -755,9 +1026,7 @@ function switchTab(name) {
       const adminPanel = $('adminPanel');
       if (adminPanel) adminPanel.style.display = 'none';
       if (state.user && state.user.role !== 'ADMIN') {
-        if (isSwalAvailable()) {
-          Swal.fire('Akses Ditolak', 'Hanya akaun PENTADBIR dibenarkan.', 'warning');
-        }
+        modalAlert('Akses Ditolak', 'Hanya akaun PENTADBIR dibenarkan.');
         switchTab('tempahan');
       }
     }
@@ -798,45 +1067,56 @@ function restoreSession() {
 }
 
 async function showLoginModal() {
-  if (!isSwalAvailable()) return;
+  const formValues = await modalForm(
+    'Log Masuk Pegawai',
+    [
+      {
+        name: 'email',
+        type: 'email',
+        label: 'Emel Rasmi',
+        placeholder: 'Emel Rasmi (moe.gov.my)',
+        required: true,
+        errorMessage: 'Sila masukkan emel rasmi anda.'
+      },
+      {
+        name: 'pass',
+        type: 'password',
+        label: 'Kata Laluan',
+        placeholder: 'Kata Laluan',
+        required: true,
+        errorMessage: 'Sila masukkan kata laluan.'
+      }
+    ],
+    'Log Masuk',
+    'Batal'
+  );
 
-  const { value: formValues } = await Swal.fire({
-    title: 'Log Masuk Pegawai',
-    html: `
-      <input id="swal-email" class="swal2-input" placeholder="Emel Rasmi (moe.gov.my)" type="email">
-      <input id="swal-pass" type="password" class="swal2-input" placeholder="Kata Laluan">
-    `,
-    focusConfirm: false,
-    showCancelButton: true,
-    confirmButtonText: 'Log Masuk',
-    preConfirm: () => [$('swal-email').value, $('swal-pass').value]
-  });
+  if (!formValues) return;
 
-  if (formValues) {
-    const [email, pass] = formValues;
-    if (!email || !pass) return toastErr('Sila isi maklumat');
-    if (!supaClient) return toastErr('Perkhidmatan belum bersedia.');
+  const { email, pass } = formValues;
+  if (!supaClient) return toastErr('Perkhidmatan belum bersedia.');
 
-    modalLoading('Mengesahkan...');
-    const { data, error } = await supaClient.rpc('fn_login_secure', { p_email: email, p_password: pass });
-    modalClose();
+  modalLoading('Mengesahkan...');
+  const { data, error } = await supaClient.rpc('fn_login_secure', { p_email: email, p_password: pass });
+  modalClose();
 
-    if (error) return Swal.fire('Ralat Sistem', error.message, 'error');
-    if (!data.ok) return Swal.fire('Gagal', data.error, 'error');
+  if (error) return modalAlert('Ralat Sistem', error.message);
+  if (!data || !data.ok) return modalAlert('Gagal', (data && data.error) || 'Log masuk gagal.');
 
-    state.user = data.user;
-    state.sessionToken = data.session_token || null;
-    state.sessionExpiresAt = data.session_expires_at || null;
+  state.user = data.user;
+  state.sessionToken = data.session_token || null;
+  state.sessionExpiresAt = data.session_expires_at || null;
 
-    if (!state.sessionToken) return Swal.fire('Ralat Sistem', 'Token sesi tidak diterima. Sila hubungi pentadbir.', 'error');
-
-    localStorage.setItem('erom_user', JSON.stringify(state.user));
-    localStorage.setItem('erom_session_token', state.sessionToken);
-    if (state.sessionExpiresAt) localStorage.setItem('erom_session_expires_at', state.sessionExpiresAt);
-
-    onLoginSuccess();
-    toastOk(`Selamat datang, ${escapeHtml(state.user.nama)}`);
+  if (!state.sessionToken) {
+    return modalAlert('Ralat Sistem', 'Token sesi tidak diterima. Sila hubungi pentadbir.');
   }
+
+  localStorage.setItem('erom_user', JSON.stringify(state.user));
+  localStorage.setItem('erom_session_token', state.sessionToken);
+  if (state.sessionExpiresAt) localStorage.setItem('erom_session_expires_at', state.sessionExpiresAt);
+
+  onLoginSuccess();
+  toastOk(`Selamat datang, ${state.user.nama}`);
 }
 
 function onLoginSuccess() {
@@ -911,7 +1191,7 @@ async function onLogout() {
     } catch {}
   }
 
-  teardownRealtime(supaClient);
+  await teardownRealtime(supaClient);
   deleteCacheByPrefix('my_').catch(() => {});
 
   resetUserState();
@@ -990,54 +1270,111 @@ async function onLogout() {
 }
 
 function showUserProfile() {
-  if (!isSwalAvailable()) return;
+  if (!state.user || typeof document === 'undefined' || !document.body) return;
 
-  Swal.fire({
-    title: escapeHtml(state.user.nama),
-    html: `
-      <div style="text-align:left; margin-bottom:15px; font-size:0.9rem;">
-        <p><strong>Sektor:</strong> ${escapeHtml(state.user.sektor)}</p>
-        <p><strong>Emel:</strong> ${escapeHtml(state.user.email)}</p>
-      </div>
-      <button id="btnChangePass" class="swal2-confirm swal2-styled" style="background:#4b5563; margin-right:5px;">Tukar Password</button>
-      <button id="btnLogout" class="swal2-cancel swal2-styled" style="background:#ef4444;">Log Keluar</button>
-    `,
-    showConfirmButton: false,
-    didOpen: () => {
-      const btnLogout = $('btnLogout');
-      const btnChangePass = $('btnChangePass');
-      if (btnLogout) btnLogout.onclick = () => { Swal.close(); onLogout(); };
-      if (btnChangePass) btnChangePass.onclick = () => { Swal.close(); changeOwnPassword(); };
-    }
+  const { dialog, box } = createBaseDialog(false);
+
+  const titleEl = createEl('h3', 'erom-modal-title');
+  titleEl.textContent = state.user.nama;
+  box.appendChild(titleEl);
+
+  const infoWrap = createEl('div', 'erom-modal-fields');
+
+  const pSektor = createEl('p', 'erom-modal-text');
+  const strongSektor = document.createElement('strong');
+  strongSektor.textContent = 'Sektor: ';
+  pSektor.appendChild(strongSektor);
+  pSektor.appendChild(document.createTextNode(state.user.sektor || '-'));
+  infoWrap.appendChild(pSektor);
+
+  const pEmail = createEl('p', 'erom-modal-text');
+  const strongEmail = document.createElement('strong');
+  strongEmail.textContent = 'Emel: ';
+  pEmail.appendChild(strongEmail);
+  pEmail.appendChild(document.createTextNode(state.user.email || '-'));
+  infoWrap.appendChild(pEmail);
+
+  box.appendChild(infoWrap);
+
+  const actions = createEl('div', 'erom-modal-actions');
+
+  const btnClose = createEl('button', 'btn ghost');
+  btnClose.type = 'button';
+  btnClose.textContent = 'Tutup';
+  actions.appendChild(btnClose);
+
+  const btnChangePass = createEl('button', 'btn secondary');
+  btnChangePass.type = 'button';
+  btnChangePass.textContent = 'Tukar Password';
+  actions.appendChild(btnChangePass);
+
+  const btnLogout = createEl('button', 'btn bad');
+  btnLogout.type = 'button';
+  btnLogout.textContent = 'Log Keluar';
+  actions.appendChild(btnLogout);
+
+  box.appendChild(actions);
+
+  const done = () => closeDialogElement(dialog);
+
+  btnClose.addEventListener('click', done);
+  btnChangePass.addEventListener('click', () => {
+    done();
+    changeOwnPassword();
   });
+  btnLogout.addEventListener('click', () => {
+    done();
+    onLogout();
+  });
+  dialog.addEventListener('cancel', (e) => {
+    e.preventDefault();
+    done();
+  });
+
+  openDialog(dialog);
 }
 
 async function changeOwnPassword() {
-  if (!isSwalAvailable()) return;
+  const form = await modalForm(
+    'Tukar Kata Laluan',
+    [
+      {
+        name: 'oldP',
+        type: 'password',
+        label: 'Kata Laluan Lama',
+        placeholder: 'Kata Laluan Lama',
+        required: true,
+        errorMessage: 'Sila masukkan kata laluan lama.'
+      },
+      {
+        name: 'newP',
+        type: 'password',
+        label: 'Kata Laluan Baru',
+        placeholder: 'Kata Laluan Baru',
+        required: true,
+        errorMessage: 'Sila masukkan kata laluan baharu.'
+      }
+    ],
+    'Kemaskini',
+    'Batal'
+  );
 
-  const { value: form } = await Swal.fire({
-    title: 'Tukar Kata Laluan',
-    html: `
-      <input id="oldP" type="password" class="swal2-input" placeholder="Kata Laluan Lama">
-      <input id="newP" type="password" class="swal2-input" placeholder="Kata Laluan Baru">
-    `,
-    focusConfirm: false,
-    showCancelButton: true,
-    preConfirm: () => [$('oldP').value, $('newP').value]
+  if (!form) return;
+  if (!supaClient) return toastErr('Perkhidmatan tidak tersedia.');
+
+  modalLoading('Mengemaskini...');
+  const { data } = await supaClient.rpc('fn_change_own_password_v2', {
+    p_email: state.user.email,
+    p_old_pass: form.oldP,
+    p_new_pass: form.newP,
+    p_session_token: getSessionToken()
   });
+  modalClose();
 
-  if (form) {
-    if (!supaClient) return toastErr('Perkhidmatan tidak tersedia.');
-    modalLoading('Mengemaskini...');
-    const { data } = await supaClient.rpc('fn_change_own_password_v2', {
-      p_email: state.user.email,
-      p_old_pass: form[0],
-      p_new_pass: form[1],
-      p_session_token: getSessionToken()
-    });
-    modalClose();
-    if (data && data.ok) Swal.fire('Berjaya', 'Kata laluan ditukar.', 'success');
-    else Swal.fire('Gagal', data?.error || 'Ralat', 'error');
+  if (data && data.ok) {
+    await modalAlert('Berjaya', 'Kata laluan ditukar.');
+  } else {
+    await modalAlert('Gagal', (data && data.error) || 'Ralat');
   }
 }
 
@@ -1057,6 +1394,7 @@ function toggleBookingForm(enable) {
 }
 
 async function onBook() {
+  if (isBookingSubmitting) return;
   if (!state.user) return toastErr('Sila log masuk dahulu');
   if (!supaClient) return toastErr('Perkhidmatan belum bersedia.');
 
@@ -1069,6 +1407,7 @@ async function onBook() {
   const namaEl = $('nama');
   const fromDateEl = $('fromDate');
   const toDateEl = $('toDate');
+  const btnBookEl = $('btnBook');
 
   const inputs = {
     room: state.room,
@@ -1097,7 +1436,10 @@ async function onBook() {
   const isConfirmed = await modalConfirm('Sahkan Tempahan?', confirmMsg);
   if (!isConfirmed) return;
 
+  isBookingSubmitting = true;
+  if (btnBookEl) btnBookEl.disabled = true;
   modalLoading('Menghantar tempahan...');
+
   try {
     let res;
     if (state.rangeMode) {
@@ -1130,18 +1472,21 @@ async function onBook() {
     modalClose();
 
     if (res.data && res.data.ok) {
-      if (isSwalAvailable()) Swal.fire('Berjaya', 'Tempahan telah direkodkan.', 'success');
+      await modalAlert('Berjaya', 'Tempahan telah direkodkan.');
       await clearActiveCaches();
       if (state.room) refreshCalendar(false);
       loadOverview(false);
       loadMyBookings(false);
       if (noteEl) noteEl.value = '';
     } else {
-      if (isSwalAvailable()) Swal.fire('Gagal', res.data?.error || 'Ralat tidak diketahui', 'error');
+      await modalAlert('Gagal', (res.data && res.data.error) || 'Ralat tidak diketahui');
     }
   } catch (e) {
     modalClose();
-    if (isSwalAvailable()) Swal.fire('Ralat Rangkaian', e.message, 'error');
+    await modalAlert('Ralat Rangkaian', e.message);
+  } finally {
+    isBookingSubmitting = false;
+    if (btnBookEl && state.user) btnBookEl.disabled = false;
   }
 }
 
@@ -1380,54 +1725,7 @@ function onGridClick(e) {
   }
 
   if (dayData && dayData.bookings && dayData.bookings.length > 0) {
-    const listWrapper = document.createElement('div');
-    listWrapper.style.cssText = 'text-align:left; font-size:0.9rem; margin-top:10px;';
-
-    const ul = document.createElement('ul');
-    ul.style.cssText = 'padding-left: 20px; margin-bottom: 0;';
-
-    dayData.bookings.forEach(b => {
-      const li = document.createElement('li');
-      li.style.cssText = 'margin-bottom:10px; border-bottom:1px dashed #ccc; padding-bottom:10px;';
-
-      const pMasa = document.createElement('div');
-      const strongMasa = document.createElement('strong');
-      strongMasa.textContent = 'Masa: ';
-      pMasa.appendChild(strongMasa);
-      pMasa.appendChild(document.createTextNode(`${toHHMM(b.masa_mula)} - ${toHHMM(b.masa_tamat)}`));
-
-      const pPenempah = document.createElement('div');
-      const strongPenempah = document.createElement('strong');
-      strongPenempah.textContent = 'Penempah: ';
-      pPenempah.appendChild(strongPenempah);
-      pPenempah.appendChild(document.createTextNode(`${b.nama_penempah} (${b.sektor})`));
-
-      const pTujuan = document.createElement('div');
-      const strongTujuan = document.createElement('strong');
-      strongTujuan.textContent = 'Tujuan: ';
-      pTujuan.appendChild(strongTujuan);
-      pTujuan.appendChild(document.createTextNode(b.tujuan));
-
-      li.appendChild(pMasa);
-      li.appendChild(pPenempah);
-      li.appendChild(pTujuan);
-      ul.appendChild(li);
-    });
-
-    listWrapper.appendChild(ul);
-
-    if (isSwalAvailable()) {
-      Swal.fire({
-        title: `Senarai Tempahan (${escapeHtml(date)})`,
-        html: listWrapper.outerHTML,
-        icon: 'info',
-        confirmButtonText: 'Tutup',
-        confirmButtonColor: '#3b82f6',
-        customClass: {
-          popup: 'swal-wide-popup'
-        }
-      });
-    }
+    modalBookingList(date, dayData.bookings);
   }
 }
 
@@ -1884,7 +2182,9 @@ async function cancelBooking(id) {
   const isConfirmed = await modalConfirm(
     'HAPUSKAN TEMPAHAN?',
     'Tindakan ini akan memadam rekod anda secara kekal dan tidak boleh dikembalikan.',
-    'Ya, Hapus Serta-merta'
+    'Ya, Hapus Serta-merta',
+    'Batal',
+    true
   );
 
   if (isConfirmed) {
@@ -1907,64 +2207,82 @@ async function cancelBooking(id) {
       const tabAdminSearch = $('tabAdminSearch');
       if (tabAdminSearch && tabAdminSearch.classList.contains('active')) executeAdminSearch();
     } else {
-      if (isSwalAvailable()) Swal.fire('Gagal', data?.error || 'Ralat', 'error');
+      await modalAlert('Gagal', (data && data.error) || 'Ralat');
     }
   }
 }
 
 async function openUnifiedBookingEditModal(booking, titleText, recordId, onAfterUpdate) {
-  if (!booking || !isSwalAvailable()) return;
+  if (!booking) return;
 
-  const { value: form } = await Swal.fire({
-    title: titleText,
-    html: `
-      <label class="small">Tarikh</label><input id="eDate" type="date" class="swal2-input" value="${escapeHtml(toYMDNorm(booking.tarikh))}">
-      <label class="small">Masa Mula</label><input id="eStart" type="time" class="swal2-input" value="${escapeHtml(toHHMM(booking.masa_mula))}">
-      <label class="small">Masa Tamat</label><input id="eEnd" type="time" class="swal2-input" value="${escapeHtml(toHHMM(booking.masa_tamat))}">
-      <label class="small">Tujuan</label><input id="eNote" class="swal2-input" value="${escapeHtml(booking.tujuan)}">
-    `,
-    showCancelButton: true,
-    confirmButtonText: 'Simpan',
-    preConfirm: () => ({
-      d: $('eDate').value,
-      s: $('eStart').value,
-      e: $('eEnd').value,
-      n: $('eNote').value
-    })
-  });
-
-  if (form) {
-    if (!supaClient) return toastErr('Perkhidmatan belum bersedia.');
-    const isConfirmed = await modalConfirm(
-      'Simpan Perubahan?',
-      'Maklumat tempahan asal akan digantikan dengan data baharu.'
-    );
-    if (!isConfirmed) return;
-
-    modalLoading('Menyimpan...');
-    const { data } = await supaClient.rpc('fn_update_booking_secure_v2', {
-      p_booking_id: recordId,
-      p_email: state.user.email,
-      p_date: form.d,
-      p_start: form.s,
-      p_end: form.e,
-      p_category: booking.kategori,
-      p_note: form.n,
-      p_sektor: booking.sektor,
-      p_nama: booking.nama_penempah,
-      p_session_token: getSessionToken()
-    });
-    modalClose();
-
-    if (data && data.ok) {
-      toastOk('Tempahan berjaya dikemaskini.');
-      await clearActiveCaches();
-      if (typeof onAfterUpdate === 'function') {
-        await onAfterUpdate();
+  const form = await modalForm(
+    titleText,
+    [
+      {
+        name: 'd',
+        type: 'date',
+        label: 'Tarikh',
+        value: toYMDNorm(booking.tarikh),
+        required: true
+      },
+      {
+        name: 's',
+        type: 'time',
+        label: 'Masa Mula',
+        value: toHHMM(booking.masa_mula),
+        required: true
+      },
+      {
+        name: 'e',
+        type: 'time',
+        label: 'Masa Tamat',
+        value: toHHMM(booking.masa_tamat),
+        required: true
+      },
+      {
+        name: 'n',
+        type: 'text',
+        label: 'Tujuan',
+        value: booking.tujuan,
+        required: true
       }
-    } else {
-      Swal.fire('Ralat', data?.error || 'Ralat tidak diketahui', 'error');
+    ],
+    'Simpan',
+    'Batal'
+  );
+
+  if (!form) return;
+  if (!supaClient) return toastErr('Perkhidmatan belum bersedia.');
+
+  const isConfirmed = await modalConfirm(
+    'Simpan Perubahan?',
+    'Maklumat tempahan asal akan digantikan dengan data baharu.'
+  );
+  if (!isConfirmed) return;
+
+  modalLoading('Menyimpan...');
+  const { data } = await supaClient.rpc('fn_update_booking_secure_v2', {
+    p_booking_id: recordId,
+    p_email: state.user.email,
+    p_date: form.d,
+    p_start: form.s,
+    p_end: form.e,
+    p_category: booking.kategori,
+    p_note: form.n,
+    p_sektor: booking.sektor,
+    p_nama: booking.nama_penempah,
+    p_session_token: getSessionToken()
+  });
+  modalClose();
+
+  if (data && data.ok) {
+    toastOk('Tempahan berjaya dikemaskini.');
+    await clearActiveCaches();
+    if (typeof onAfterUpdate === 'function') {
+      await onAfterUpdate();
     }
+  } else {
+    await modalAlert('Ralat', (data && data.error) || 'Ralat tidak diketahui');
   }
 }
 
@@ -2099,66 +2417,67 @@ function renderMyBookingsTable() {
 }
 
 async function adminAddUser() {
-  if (!isSwalAvailable()) return;
-
-  const { value: formValues } = await Swal.fire({
-    title: 'Tambah Pegawai Baharu',
-    html: `
-      <div style="text-align:left;">
-        <label class="small">Nama Penuh</label>
-        <input id="swal-new-nama" class="swal2-input" placeholder="Contoh: Ahmad bin Ali" style="margin-top:5px; margin-bottom:15px;">
-        <label class="small">Sektor / Unit</label>
-        <input id="swal-new-sektor" class="swal2-input" placeholder="Contoh: Sektor Pengurusan" style="margin-top:5px; margin-bottom:15px;">
-        <label class="small">Emel Rasmi (ID Log Masuk)</label>
-        <input id="swal-new-email" type="email" class="swal2-input" placeholder="Contoh: ahmad@moe.gov.my" style="margin-top:5px; margin-bottom:15px;">
-        <label class="small">Kata Laluan Sementara</label>
-        <input id="swal-new-pass" type="text" class="swal2-input" value="ppdag@12345" style="margin-top:5px;">
-      </div>
-    `,
-    focusConfirm: false,
-    showCancelButton: true,
-    confirmButtonText: 'Daftar Pegawai',
-    cancelButtonText: 'Batal',
-    preConfirm: () => {
-      const namaEl = $('swal-new-nama');
-      const sektorEl = $('swal-new-sektor');
-      const emailEl = $('swal-new-email');
-      const passEl = $('swal-new-pass');
-
-      const nama = namaEl ? namaEl.value.trim() : '';
-      const sektor = sektorEl ? sektorEl.value.trim() : '';
-      const email = emailEl ? emailEl.value.trim() : '';
-      const pass = passEl ? passEl.value.trim() : '';
-
-      if (!nama || !sektor || !email || !pass) {
-        Swal.showValidationMessage('Sila lengkapkan semua ruang.');
-        return false;
+  const formValues = await modalForm(
+    'Tambah Pegawai Baharu',
+    [
+      {
+        name: 'nama',
+        type: 'text',
+        label: 'Nama Penuh',
+        placeholder: 'Contoh: Ahmad bin Ali',
+        required: true,
+        errorMessage: 'Sila lengkapkan semua ruang.'
+      },
+      {
+        name: 'sektor',
+        type: 'text',
+        label: 'Sektor / Unit',
+        placeholder: 'Contoh: Sektor Pengurusan',
+        required: true,
+        errorMessage: 'Sila lengkapkan semua ruang.'
+      },
+      {
+        name: 'email',
+        type: 'email',
+        label: 'Emel Rasmi (ID Log Masuk)',
+        placeholder: 'Contoh: ahmad@moe.gov.my',
+        required: true,
+        errorMessage: 'Sila lengkapkan semua ruang.'
+      },
+      {
+        name: 'pass',
+        type: 'text',
+        label: 'Kata Laluan Sementara',
+        value: 'ppdag@12345',
+        required: true,
+        errorMessage: 'Sila lengkapkan semua ruang.'
       }
-      return { nama, sektor, email, pass };
-    }
+    ],
+    'Daftar Pegawai',
+    'Batal'
+  );
+
+  if (!formValues) return;
+  if (!supaClient) return toastErr('Perkhidmatan belum bersedia.');
+
+  modalLoading('Mendaftar Pegawai...');
+
+  const { data } = await supaClient.rpc('fn_admin_create_user_v2', {
+    p_admin_email: state.user.email,
+    p_session_token: getSessionToken(),
+    p_new_email: formValues.email,
+    p_new_password: formValues.pass,
+    p_new_name: formValues.nama,
+    p_new_sektor: formValues.sektor
   });
 
-  if (formValues) {
-    if (!supaClient) return toastErr('Perkhidmatan belum bersedia.');
-    modalLoading('Mendaftar Pegawai...');
+  modalClose();
 
-    const { data } = await supaClient.rpc('fn_admin_create_user_v2', {
-      p_admin_email: state.user.email,
-      p_session_token: getSessionToken(),
-      p_new_email: formValues.email,
-      p_new_password: formValues.pass,
-      p_new_name: formValues.nama,
-      p_new_sektor: formValues.sektor
-    });
-
-    modalClose();
-
-    if (data && data.ok) {
-      Swal.fire('Berjaya', 'Pegawai baharu telah didaftarkan.', 'success');
-      loadAdminUserList();
-    } else {
-      Swal.fire('Gagal', data?.error || 'Ralat semasa mendaftar pegawai', 'error');
-    }
+  if (data && data.ok) {
+    await modalAlert('Berjaya', 'Pegawai baharu telah didaftarkan.');
+    loadAdminUserList();
+  } else {
+    await modalAlert('Gagal', (data && data.error) || 'Ralat semasa mendaftar pegawai');
   }
 }
 
@@ -2266,15 +2585,12 @@ async function loadAdminUserList() {
 }
 
 async function adminResetPassword(id, email) {
-  if (!isSwalAvailable()) return;
+  const isConfirmed = await modalConfirm(
+    'Reset Kata Laluan?',
+    `Reset password ${email} kepada 'ppdag@12345'?`,
+    'Ya, Reset'
+  );
 
-  const { isConfirmed } = await Swal.fire({
-    title: 'Reset Kata Laluan?',
-    text: `Reset password ${email} kepada 'ppdag@12345'?`,
-    icon: 'question',
-    showCancelButton: true,
-    confirmButtonText: 'Ya, Reset'
-  });
   if (isConfirmed) {
     if (!supaClient) return toastErr('Perkhidmatan belum bersedia.');
     modalLoading('Memproses...');
@@ -2284,28 +2600,26 @@ async function adminResetPassword(id, email) {
       p_session_token: getSessionToken()
     });
     modalClose();
-    if (data && data.ok) Swal.fire('Berjaya', 'Kata laluan telah ditetapkan semula.', 'success');
-    else Swal.fire('Gagal', data?.error || 'Ralat tidak diketahui', 'error');
+    if (data && data.ok) {
+      await modalAlert('Berjaya', 'Kata laluan telah ditetapkan semula.');
+    } else {
+      await modalAlert('Gagal', (data && data.error) || 'Ralat tidak diketahui');
+    }
   }
 }
 
 async function adminDeleteUser(id, email) {
-  if (!isSwalAvailable()) return;
-
   if (email === state.user.email) {
-    return Swal.fire('Tidak Dibenarkan', 'Anda tidak boleh membuang akaun anda sendiri.', 'warning');
+    return modalAlert('Tidak Dibenarkan', 'Anda tidak boleh membuang akaun anda sendiri.');
   }
 
-  const { isConfirmed } = await Swal.fire({
-    title: 'Buang Pegawai?',
-    text: `Anda pasti mahu memadam akaun pegawai ${email}? Semua rekod login berkaitan akan terhapus. (Sila pastikan anda juga menguruskan tempahan bilik mereka jika perlu).`,
-    icon: 'warning',
-    showCancelButton: true,
-    confirmButtonColor: '#d33',
-    cancelButtonColor: '#3085d6',
-    confirmButtonText: 'Ya, Padam',
-    cancelButtonText: 'Batal'
-  });
+  const isConfirmed = await modalConfirm(
+    'Buang Pegawai?',
+    `Anda pasti mahu memadam akaun pegawai ${email}? Semua rekod login berkaitan akan terhapus. (Sila pastikan anda juga menguruskan tempahan bilik mereka jika perlu).`,
+    'Ya, Padam',
+    'Batal',
+    true
+  );
 
   if (isConfirmed) {
     if (!supaClient) return toastErr('Perkhidmatan belum bersedia.');
@@ -2323,7 +2637,7 @@ async function adminDeleteUser(id, email) {
       toastOk('Akaun pegawai telah dipadam.');
       loadAdminUserList();
     } else {
-      Swal.fire('Gagal', data?.error || 'Ralat semasa memadam pegawai', 'error');
+      await modalAlert('Gagal', (data && data.error) || 'Ralat semasa memadam pegawai');
     }
   }
 }
@@ -2466,48 +2780,58 @@ async function loadAdminBookingList() {
 }
 
 async function executeBulkCancel() {
-  if (!isSwalAvailable()) return;
-
   const checked = document.querySelectorAll('.chk-item:checked');
   if (checked.length === 0) return toastWarn('Pilih sekurang-kurangnya satu tempahan.');
 
   const ids = Array.from(checked).map(c => c.value);
 
-  const { value: reason } = await Swal.fire({
-    title: 'Sebab Pembatalan?',
-    input: 'text',
-    inputPlaceholder: 'Cth: Penyelenggaraan Bilik',
-    showCancelButton: true
+  const form = await modalForm(
+    'Sebab Pembatalan?',
+    [
+      {
+        name: 'reason',
+        type: 'text',
+        label: 'Nyatakan Sebab',
+        placeholder: 'Cth: Penyelenggaraan Bilik',
+        required: true,
+        errorMessage: 'Sila nyatakan sebab pembatalan.'
+      }
+    ],
+    'Teruskan',
+    'Batal'
+  );
+
+  if (!form || !form.reason) return;
+  if (!supaClient) return toastErr('Perkhidmatan belum bersedia.');
+
+  const isConfirmed = await modalConfirm(
+    'Sahkan Pembatalan Pukal?',
+    `Anda akan membatalkan ${ids.length} tempahan terpilih dengan sebab: "${form.reason}".`,
+    'Ya, Batalkan Pukal',
+    'Batal',
+    true
+  );
+
+  if (!isConfirmed) return;
+
+  modalLoading('Membatalkan...');
+  const { data } = await supaClient.rpc('fn_delete_booking_bulk_secure_v2', {
+    p_ids: ids,
+    p_email: state.user.email,
+    p_reason: form.reason,
+    p_session_token: getSessionToken()
   });
+  modalClose();
 
-  if (reason) {
-    if (!supaClient) return toastErr('Perkhidmatan belum bersedia.');
-    const isConfirmed = await modalConfirm(
-      'Sahkan Pembatalan Pukal?',
-      `Anda akan membatalkan ${ids.length} tempahan terpilih dengan sebab: "${escapeHtml(reason)}".`
-    );
-
-    if (!isConfirmed) return;
-
-    modalLoading('Membatalkan...');
-    const { data } = await supaClient.rpc('fn_delete_booking_bulk_secure_v2', {
-      p_ids: ids,
-      p_email: state.user.email,
-      p_reason: reason,
-      p_session_token: getSessionToken()
-    });
-    modalClose();
-
-    if (data && data.ok) {
-      toastOk(`${data.updated} tempahan dibatalkan.`);
-      await clearActiveCaches();
-      loadAdminBookingList();
-      loadMyBookings(false);
-      if (state.room) refreshCalendar(false);
-      loadOverview(false);
-    } else {
-      Swal.fire('Ralat', data?.error, 'error');
-    }
+  if (data && data.ok) {
+    toastOk(`${data.updated} tempahan dibatalkan.`);
+    await clearActiveCaches();
+    loadAdminBookingList();
+    loadMyBookings(false);
+    if (state.room) refreshCalendar(false);
+    loadOverview(false);
+  } else {
+    await modalAlert('Ralat', (data && data.error) || 'Gagal melaksanakan pembatalan pukal.');
   }
 }
 

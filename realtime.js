@@ -1,6 +1,5 @@
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
-
 let supabaseClientInstance = null;
+let clientInitPromise = null;
 let activeChannel = null;
 let activeClient = null;
 let activePayloadHandler = null;
@@ -10,6 +9,23 @@ let isReconnecting = false;
 let lifecycleListenersBound = false;
 
 const timestampRegistry = new Map();
+
+async function resolveCreateClient() {
+  if (
+    typeof window !== 'undefined' &&
+    window.supabase &&
+    typeof window.supabase.createClient === 'function'
+  ) {
+    return window.supabase.createClient;
+  }
+
+  const mod = await import('https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm');
+  if (mod && typeof mod.createClient === 'function') {
+    return mod.createClient;
+  }
+
+  throw new Error('Supabase client library unavailable.');
+}
 
 function resolveRecordId(record) {
   if (!record || typeof record !== 'object') {
@@ -52,6 +68,15 @@ function createChannelSubscription(client) {
     .subscribe();
 }
 
+async function removeChannelSafely(client, channel) {
+  if (!channel || !client || typeof client.removeChannel !== 'function') {
+    return;
+  }
+  try {
+    await client.removeChannel(channel);
+  } catch {}
+}
+
 async function handleResumeSync() {
   if (!isSubscribed || !activeClient || isReconnecting) {
     return;
@@ -61,13 +86,10 @@ async function handleResumeSync() {
   try {
     const channelState = activeChannel ? activeChannel.state : null;
     if (!activeChannel || channelState !== 'joined') {
-      if (activeChannel && typeof activeClient.removeChannel === 'function') {
-        const staleChannel = activeChannel;
-        activeChannel = null;
-        try {
-          await activeClient.removeChannel(staleChannel);
-        } catch {}
-      }
+      const staleChannel = activeChannel;
+      activeChannel = null;
+      await removeChannelSafely(activeClient, staleChannel);
+
       if (isSubscribed && activeClient) {
         activeChannel = createChannelSubscription(activeClient);
       }
@@ -104,21 +126,39 @@ function bindLifecycleListeners() {
   lifecycleListenersBound = true;
 }
 
+export function resetTimestampRegistry() {
+  timestampRegistry.clear();
+}
+
 export async function getSupabaseClient() {
   if (supabaseClientInstance) {
     return supabaseClientInstance;
   }
-  if (typeof window !== 'undefined' && window.ENV_READY) {
-    await window.ENV_READY;
+
+  if (clientInitPromise) {
+    return clientInitPromise;
   }
-  const env = (typeof window !== 'undefined' && window.__ENV) ? window.__ENV : {};
-  const url = String(env.SUPABASE_URL || '').trim();
-  const key = String(env.SUPABASE_ANON_KEY || '').trim();
-  if (!url || !key) {
-    throw new Error('Supabase configuration credentials missing');
-  }
-  supabaseClientInstance = createClient(url, key);
-  return supabaseClientInstance;
+
+  clientInitPromise = (async () => {
+    try {
+      if (typeof window !== 'undefined' && window.ENV_READY) {
+        await window.ENV_READY;
+      }
+      const env = (typeof window !== 'undefined' && window.__ENV) ? window.__ENV : {};
+      const url = String(env.SUPABASE_URL || '').trim();
+      const key = String(env.SUPABASE_ANON_KEY || '').trim();
+      if (!url || !key) {
+        throw new Error('Supabase configuration credentials missing');
+      }
+      const createClient = await resolveCreateClient();
+      supabaseClientInstance = createClient(url, key);
+      return supabaseClientInstance;
+    } finally {
+      clientInitPromise = null;
+    }
+  })();
+
+  return clientInitPromise;
 }
 
 export function isLatestPayload(record) {
@@ -138,7 +178,7 @@ export function isLatestPayload(record) {
   return true;
 }
 
-export function teardownRealtime(client) {
+export async function teardownRealtime(client) {
   const targetClient = client || activeClient || supabaseClientInstance;
   const channelToRemove = activeChannel;
 
@@ -147,14 +187,7 @@ export function teardownRealtime(client) {
   activePayloadHandler = null;
   activeSyncHandler = null;
 
-  if (channelToRemove && targetClient && typeof targetClient.removeChannel === 'function') {
-    try {
-      return Promise.resolve(targetClient.removeChannel(channelToRemove)).catch(() => {});
-    } catch {
-      return Promise.resolve();
-    }
-  }
-  return Promise.resolve();
+  await removeChannelSafely(targetClient, channelToRemove);
 }
 
 export function subscribeBookingsRealtime(client, onPayload, onReconnectSync) {
@@ -163,9 +196,8 @@ export function subscribeBookingsRealtime(client, onPayload, onReconnectSync) {
     return null;
   }
 
-  if (activeChannel) {
-    teardownRealtime(targetClient);
-  }
+  const previousChannel = activeChannel;
+  activeChannel = null;
 
   activeClient = targetClient;
   activePayloadHandler = typeof onPayload === 'function' ? onPayload : null;
@@ -173,7 +205,16 @@ export function subscribeBookingsRealtime(client, onPayload, onReconnectSync) {
   isSubscribed = true;
 
   bindLifecycleListeners();
-  activeChannel = createChannelSubscription(targetClient);
 
+  if (previousChannel) {
+    removeChannelSafely(targetClient, previousChannel).then(() => {
+      if (isSubscribed && activeClient === targetClient && !activeChannel) {
+        activeChannel = createChannelSubscription(targetClient);
+      }
+    });
+    return null;
+  }
+
+  activeChannel = createChannelSubscription(targetClient);
   return activeChannel;
 }

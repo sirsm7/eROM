@@ -1,12 +1,21 @@
 window.ENV_READY = (async function initializeConfig() {
+  const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+  const timeoutId = controller ? setTimeout(() => controller.abort(), 10000) : null;
+
   try {
-    const response = await fetch('/api/config', {
+    const fetchOptions = {
       method: 'GET',
       headers: {
         'Accept': 'application/json'
       },
       cache: 'no-store'
-    });
+    };
+
+    if (controller) {
+      fetchOptions.signal = controller.signal;
+    }
+
+    const response = await fetch('/api/config', fetchOptions);
 
     let data = null;
     try {
@@ -22,7 +31,7 @@ window.ENV_READY = (async function initializeConfig() {
       throw new Error(serverMessage);
     }
 
-    if (!data || typeof data !== 'object') {
+    if (!data || typeof data !== 'object' || Array.isArray(data)) {
       throw new Error('Invalid configuration payload received.');
     }
 
@@ -36,6 +45,15 @@ window.ENV_READY = (async function initializeConfig() {
       throw new Error('Missing required SUPABASE_URL or SUPABASE_ANON_KEY configuration.');
     }
 
+    try {
+      const parsedUrl = new URL(resolvedConfig.SUPABASE_URL);
+      if (parsedUrl.protocol !== 'https:' && parsedUrl.protocol !== 'http:') {
+        throw new Error('Invalid SUPABASE_URL protocol.');
+      }
+    } catch {
+      throw new Error('Invalid SUPABASE_URL format received from configuration.');
+    }
+
     window.__ENV = Object.freeze(resolvedConfig);
     return window.__ENV;
   } catch (err) {
@@ -44,6 +62,14 @@ window.ENV_READY = (async function initializeConfig() {
       SUPABASE_ANON_KEY: '',
       GAS_ENDPOINT_URL: ''
     });
+
+    if (err && err.name === 'AbortError') {
+      throw new Error('Configuration request timed out.');
+    }
     throw err;
+  } finally {
+    if (timeoutId !== null) {
+      clearTimeout(timeoutId);
+    }
   }
 })();

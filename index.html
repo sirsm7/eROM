@@ -21,41 +21,44 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Oswald:wght@400;500;700&display=swap" rel="stylesheet">
 
-  <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="./config.js?v=20261112"></script>
 
   <link rel="stylesheet" href="./assets/css/style.css?v=20261112">
 </head>
 <body>
-  <div class="wrap">
-    <h1>
-      <div class="header-flex-container">
-        <div class="header-title-group">
-          <img src="assets/img/logo-kpm.png" alt="Logo KPM" class="header-logo">
-          <span>eROM@AG — Sistem Pengurusan Tempahan Bilik PPD Alor Gajah</span>
-        </div>
+  <main class="wrap min-h-dvh">
+    <header>
+      <h1>
+        <div class="header-flex-container">
+          <div class="header-title-group">
+            <img src="assets/img/logo-kpm.png" alt="Logo KPM" class="header-logo">
+            <span>eROM@AG — Sistem Pengurusan Tempahan Bilik PPD Alor Gajah</span>
+          </div>
 
-        <div class="auth-controls">
-          <button id="mainLoginBtn" class="btn-login" type="button">LOG MASUK</button>
-          <div id="userProfileBadge" class="user-badge">
-            <span id="userRoleTag" class="user-role">USER</span>
-            <span id="userDisplayName">Nama</span>
+          <div class="auth-controls">
+            <button id="mainLoginBtn" class="btn-login" type="button">LOG MASUK</button>
+            <div id="userProfileBadge" class="user-badge" role="button" tabindex="0" aria-label="Profil Pengguna">
+              <span id="userRoleTag" class="user-role">USER</span>
+              <span id="userDisplayName">Nama</span>
+            </div>
           </div>
         </div>
-      </div>
-    </h1>
+      </h1>
+    </header>
 
-    <div class="tabs">
+    <nav class="tabs" aria-label="Navigasi Utama">
       <button id="tabTempahanBtn" class="tabbtn active" type="button">Tempahan</button>
       <button id="tabKalendarBtn" class="tabbtn" type="button">Rumusan Tempahan</button>
       <button id="tabTempahanSayaBtn" class="tabbtn" type="button" style="display:none">Tempahan Saya</button>
       <button id="tabAdminBtn" class="tabbtn" type="button" style="display:none">Pentadbir</button>
       <button id="tabAdminSearchBtn" class="tabbtn" type="button" style="display:none">Carian Tempahan</button>
-    </div>
+    </nav>
 
-    <section id="tabTempahan" class="tabpane active">
+    <section id="tabTempahan" class="tabpane active" aria-labelledby="tabTempahanBtn">
       <div class="card toolbar">
-        <div>
+        <div class="min-w-0">
           <label class="small req" for="roomSelect">Pilih Bilik</label><br>
           <select id="roomSelect" required>
             <option value="">Sila Pilih Bilik</option>
@@ -109,37 +112,37 @@
         </div>
 
         <div id="bookingFormContainer" class="row" style="margin-top:10px; gap:10px; flex-wrap:wrap">
-          <div>
+          <div class="min-w-0">
             <label class="small req" for="pickedDate">Tarikh Dipilih</label><br>
             <input id="pickedDate" type="date" required>
           </div>
 
-          <div id="fromDateWrap" style="display:none">
+          <div id="fromDateWrap" class="min-w-0" style="display:none">
             <label class="small req" for="fromDate">Tarikh Dari</label><br>
             <input id="fromDate" type="date">
           </div>
 
-          <div id="toDateWrap" style="display:none">
+          <div id="toDateWrap" class="min-w-0" style="display:none">
             <label class="small req" for="toDate">Tarikh Hingga</label><br>
             <input id="toDate" type="date">
           </div>
 
-          <div>
+          <div class="min-w-0">
             <label class="small req" for="startTime">Masa Mula (≥ 08:00)</label><br>
             <input id="startTime" type="time" min="08:00" max="17:00" step="1800" required>
           </div>
 
-          <div>
+          <div class="min-w-0">
             <label class="small req" for="endTime">Masa Tamat (≤ 17:00)</label><br>
             <input id="endTime" type="time" min="08:00" max="17:00" step="1800" required>
           </div>
 
-          <div>
+          <div class="min-w-0">
             <label class="small req" for="category">Kategori</label><br>
             <select id="category" required></select>
           </div>
 
-          <div style="min-width:320px;flex:1">
+          <div class="min-w-0" style="min-width:260px;flex:1">
             <label class="small req" for="note">Tujuan / Ringkasan</label><br>
             <input
               id="note"
@@ -151,12 +154,12 @@
             >
           </div>
 
-          <div>
+          <div class="min-w-0">
             <label class="small req" for="sektor">Sektor</label><br>
             <select id="sektor" required></select>
           </div>
 
-          <div>
+          <div class="min-w-0">
             <label class="small req" for="nama">Nama Penempah</label><br>
             <select id="nama" required disabled>
               <option value="">— Sila pilih sektor dahulu —</option>
@@ -174,9 +177,9 @@
       </div>
     </section>
 
-    <section id="tabKalendar" class="tabpane">
+    <section id="tabKalendar" class="tabpane" aria-labelledby="tabKalendarBtn">
       <div class="card toolbar">
-        <div>
+        <div class="min-w-0">
           <div class="small" style="font-weight:600">Rumusan Semua Bilik (Read-only)</div>
           <div style="margin-top:4px;">
             <label class="small" for="ovRoomFilter">Tapis Bilik:</label>
@@ -224,7 +227,7 @@
           </div>
         </div>
 
-        <div id="ovTableWrap" class="table-responsive" style="display:none">
+        <div id="ovTableWrap" class="table-responsive overflow-x-auto" style="display:none">
           <table>
             <thead>
               <tr>
@@ -242,9 +245,9 @@
       </div>
     </section>
 
-    <section id="tabTempahanSaya" class="tabpane">
+    <section id="tabTempahanSaya" class="tabpane" aria-labelledby="tabTempahanSayaBtn">
       <div class="card toolbar">
-        <div>
+        <div class="min-w-0">
           <div class="small" style="font-weight:600; font-size:1rem; color:var(--primary);">Senarai Tempahan Saya</div>
           <div style="margin-top:4px;" class="small">Urus, kemaskini atau batal tempahan yang anda lakukan di sini.</div>
         </div>
@@ -254,7 +257,7 @@
       </div>
 
       <div class="card">
-        <div class="table-responsive">
+        <div class="table-responsive overflow-x-auto">
           <table>
             <thead>
               <tr>
@@ -273,7 +276,7 @@
       </div>
     </section>
 
-    <section id="tabAdmin" class="tabpane">
+    <section id="tabAdmin" class="tabpane" aria-labelledby="tabAdminBtn">
       <div class="card">
         <div id="adminLoginBox" style="display:block; text-align:center; padding:40px;">
           <h3>Akses Pentadbir</h3>
@@ -294,7 +297,7 @@
                 <button class="btn secondary" id="adminRefreshUsers" type="button" style="padding:6px 12px; font-size:0.8rem;">Muat Semula</button>
               </div>
             </div>
-            <div class="scrollable-table">
+            <div class="scrollable-table overflow-x-auto">
               <table>
                 <thead>
                   <tr>
@@ -314,7 +317,7 @@
           <div>
             <label class="small" style="font-size:0.9rem;">Pengurusan Tempahan Bilik</label>
             <div class="row" style="margin-top:8px; gap:12px; align-items:end;">
-              <div style="flex:1;">
+              <div class="min-w-0" style="flex:1;">
                 <label class="small" for="adminRoom">Pilih Bilik (Admin)</label><br>
                 <select id="adminRoom" style="width:100%;">
                   <option value="">Sila Pilih Bilik</option>
@@ -327,7 +330,7 @@
               </div>
             </div>
 
-            <div id="adminList" class="table-responsive" style="margin-top:16px;"></div>
+            <div id="adminList" class="table-responsive overflow-x-auto" style="margin-top:16px;"></div>
           </div>
 
           <div class="admin-migration-section">
@@ -341,7 +344,7 @@
                 <button class="btn secondary" id="btnExportJson" type="button">Muat Turun Sandaran (.json)</button>
               </div>
 
-              <div class="migration-file-group">
+              <div class="migration-file-group min-w-0">
                 <label class="small" for="importJsonFile">Pilih Fail Sandaran (.json)</label><br>
                 <input id="importJsonFile" class="migration-file-input" type="file" accept=".json,application/json">
               </div>
@@ -357,10 +360,10 @@
       </div>
     </section>
 
-    <section id="tabAdminSearch" class="tabpane">
+    <section id="tabAdminSearch" class="tabpane" aria-labelledby="tabAdminSearchBtn">
       <div class="card toolbar" id="adminSearchToolbar">
         <div style="display:flex; justify-content:space-between; align-items:center; width: 100%;">
-          <div>
+          <div class="min-w-0">
             <div class="small" style="font-weight:600; font-size:1rem; color:var(--primary);">Carian Keseluruhan Tempahan (Admin)</div>
             <div style="margin-top:4px;" class="small">Tapis tempahan berdasarkan julat tarikh, bilik dan penempah.</div>
           </div>
@@ -370,21 +373,21 @@
 
       <div class="card">
         <div class="row" id="adminSearchFilterForm" style="margin-bottom:16px; align-items:end; gap:12px;">
-          <div>
+          <div class="min-w-0">
             <label class="small" for="adminSearchStartDate">Tarikh Mula</label><br>
             <input type="date" id="adminSearchStartDate" required>
           </div>
-          <div>
+          <div class="min-w-0">
             <label class="small" for="adminSearchEndDate">Tarikh Akhir</label><br>
             <input type="date" id="adminSearchEndDate" required>
           </div>
-          <div style="flex:1;">
+          <div class="min-w-0" style="flex:1;">
             <label class="small" for="adminSearchRoom">Pilih Bilik</label><br>
             <select id="adminSearchRoom" style="width:100%;">
               <option value="">Semua Bilik</option>
             </select>
           </div>
-          <div style="flex:1;">
+          <div class="min-w-0" style="flex:1;">
             <label class="small" for="adminSearchUserFilter">Tapis Penempah (Selepas Carian)</label><br>
             <select id="adminSearchUserFilter" style="width:100%;" disabled>
               <option value="">— Semua Penempah —</option>
@@ -403,7 +406,7 @@
           </div>
         </div>
 
-        <div class="table-responsive">
+        <div class="table-responsive overflow-x-auto">
           <table>
             <thead>
               <tr>
@@ -423,21 +426,7 @@
         </div>
       </div>
     </section>
-
-  </div>
-
-  <script>
-    if ('serviceWorker' in navigator) {
-      window.addEventListener('load', () => {
-        navigator.serviceWorker
-          .register('./sw.js', { updateViaCache: 'none' })
-          .then((reg) => {
-            reg.update().catch(() => {});
-          })
-          .catch(() => {});
-      });
-    }
-  </script>
+  </main>
 
   <script type="module" src="./assets/js/app.js?v=20261112"></script>
 </body>

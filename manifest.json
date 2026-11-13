@@ -1,6 +1,10 @@
 {
+  "id": "./",
   "name": "eROM@AG - Sistem Tempahan",
   "short_name": "eROM@AG",
+  "description": "Sistem Pengurusan Tempahan Bilik PPD Alor Gajah",
+  "lang": "ms",
+  "scope": "./",
   "start_url": "./index.html",
   "display": "standalone",
   "background_color": "#f1f5f9",
@@ -10,12 +14,14 @@
     {
       "src": "assets/img/logo-kpm.png",
       "sizes": "192x192",
-      "type": "image/png"
+      "type": "image/png",
+      "purpose": "any"
     },
     {
       "src": "assets/img/logo-kpm.png",
       "sizes": "512x512",
-      "type": "image/png"
+      "type": "image/png",
+      "purpose": "any"
     }
   ]
 }
