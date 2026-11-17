@@ -25,9 +25,22 @@
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="./config.js?v=20261113"></script>
 
-  <link rel="stylesheet" href="./assets/css/style.css?v=20261113">
+  <link rel="stylesheet" href="./assets/css/style.css?v=20261117">
 </head>
 <body>
+  <div id="maintenanceOverlay" class="maintenance-overlay" role="alertdialog" aria-modal="true" aria-labelledby="maintenanceTitle" aria-describedby="maintenanceMessage" hidden style="display:none">
+    <div class="maintenance-card">
+      <img src="assets/img/logo-kpm.png" alt="Logo KPM" class="maintenance-logo">
+      <div class="maintenance-badge">PENYELENGGARAAN SISTEM</div>
+      <h2 id="maintenanceTitle" class="maintenance-title">Sistem Sedang Diselenggara</h2>
+      <p id="maintenanceMessage" class="maintenance-message">Sistem sedang diselenggara dan akan kembali beroperasi secepat mungkin. Semua aktiviti tempahan dan capaian pengguna disekat buat sementara waktu sehingga sambungan pangkalan data pulih.</p>
+      <p id="maintenanceDetail" class="maintenance-detail" style="display:none"></p>
+      <div class="maintenance-actions">
+        <button id="btnRetryDbConnection" class="btn" type="button">Cuba Semula Sambungan</button>
+      </div>
+    </div>
+  </div>
+
   <main class="wrap min-h-dvh">
     <header>
       <h1>
@@ -428,6 +441,6 @@
     </section>
   </main>
 
-  <script type="module" src="./assets/js/app.js?v=20261113"></script>
+  <script type="module" src="./assets/js/app.js?v=20261117"></script>
 </body>
 </html>

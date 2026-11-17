@@ -1,9 +1,9 @@
-const CACHE_NAME = 'erom-ag-v17';
+const CACHE_NAME = 'erom-ag-v18';
 const ASSETS_TO_CACHE = [
   './',
   './index.html',
-  './assets/css/style.css?v=20261113',
-  './assets/js/app.js?v=20261113',
+  './assets/css/style.css?v=20261117',
+  './assets/js/app.js?v=20261117',
   './assets/img/logo-kpm.png',
   './config.js?v=20261113',
   './idb-cache.js',

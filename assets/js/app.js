@@ -14,6 +14,8 @@ import {
 
 const SHOW_PAST_DAYS = false;
 const LEGACY_BLOCKED_ADMIN_EMAIL = 'admin@moe.gov.my';
+const DB_CONNECT_TIMEOUT_MS = 8000;
+const MAINTENANCE_PRIMARY_MESSAGE = 'Sistem sedang diselenggara dan akan kembali beroperasi secepat mungkin. Semua aktiviti tempahan dan capaian pengguna disekat buat sementara waktu sehingga sambungan pangkalan data pulih.';
 
 const ROOM_OPTIONS = [
   "PKG Melekek - Bilik Kuliah (25 orang)",
@@ -206,6 +208,7 @@ function openDialog(dialog) {
 }
 
 function modalLoading(title = 'Memproses...') {
+  if (state.isDatabaseUnavailable) return;
   if (typeof document === 'undefined' || !document.body) return;
   const { dialog, box } = createBaseDialog(false);
 
@@ -226,6 +229,9 @@ function modalLoading(title = 'Memproses...') {
 }
 
 function modalAlert(title, text) {
+  if (state.isDatabaseUnavailable) {
+    return Promise.resolve();
+  }
   if (typeof document === 'undefined' || !document.body) {
     return Promise.resolve();
   }
@@ -267,6 +273,9 @@ function modalAlert(title, text) {
 }
 
 function modalConfirm(title, text, confirmText = 'Ya, Teruskan', cancelText = 'Batal', isDanger = false) {
+  if (state.isDatabaseUnavailable) {
+    return Promise.resolve(false);
+  }
   if (typeof document === 'undefined' || !document.body) {
     return Promise.resolve(false);
   }
@@ -316,6 +325,9 @@ function modalConfirm(title, text, confirmText = 'Ya, Teruskan', cancelText = 'B
 }
 
 function modalForm(title, fields, confirmText = 'Simpan', cancelText = 'Batal') {
+  if (state.isDatabaseUnavailable) {
+    return Promise.resolve(null);
+  }
   if (typeof document === 'undefined' || !document.body) {
     return Promise.resolve(null);
   }
@@ -413,6 +425,7 @@ function modalForm(title, fields, confirmText = 'Simpan', cancelText = 'Batal') 
 }
 
 function modalBookingList(dateStr, bookings) {
+  if (state.isDatabaseUnavailable) return;
   if (typeof document === 'undefined' || !document.body) return;
 
   const { dialog, box } = createBaseDialog(true);
@@ -498,6 +511,7 @@ const DEFAULT_USER_STATE = {
 
 let state = {
   ...DEFAULT_USER_STATE,
+  isDatabaseUnavailable: false,
   year: new Date().getFullYear(),
   month: new Date().getMonth() + 1,
   room: '',
@@ -525,11 +539,337 @@ let adminState = {
 
 let supaClient = null;
 let isBootstrapped = false;
+let isDropdownsInitialized = false;
+let isRetryingConnection = false;
 let isBookingSubmitting = false;
 let authStateSubscription = null;
 let adminSearchAbortController = null;
 let adminBookingListAbortController = null;
 let adminUserListAbortController = null;
+
+function isDatabaseConnectionError(err) {
+  if (!err) return false;
+  const status = Number(err.status || err.statusCode || 0);
+  if (
+    status === 502 ||
+    status === 503 ||
+    status === 504 ||
+    status === 520 ||
+    status === 521 ||
+    status === 522 ||
+    status === 523 ||
+    status === 524
+  ) {
+    return true;
+  }
+
+  const code = String(err.code || '').trim().toUpperCase();
+  if (
+    code === 'PGRST000' ||
+    code === 'PGRST001' ||
+    code === 'PGRST002' ||
+    code === 'PGRST003' ||
+    code === '08000' ||
+    code === '08001' ||
+    code === '08003' ||
+    code === '08004' ||
+    code === '08006' ||
+    code === '57P01' ||
+    code === '57P02' ||
+    code === '57P03'
+  ) {
+    return true;
+  }
+
+  const rawText = [
+    err.message,
+    err.details,
+    err.hint,
+    typeof err === 'string' ? err : ''
+  ]
+    .filter(Boolean)
+    .join(' ')
+    .toLowerCase();
+
+  return (
+    rawText.includes('failed to fetch') ||
+    rawText.includes('networkerror') ||
+    rawText.includes('network request failed') ||
+    rawText.includes('load failed') ||
+    rawText.includes('econnrefused') ||
+    rawText.includes('enotfound') ||
+    rawText.includes('connection refused') ||
+    rawText.includes('could not connect') ||
+    rawText.includes('database connection') ||
+    rawText.includes('service unavailable') ||
+    rawText.includes('bad gateway') ||
+    rawText.includes('gateway timeout') ||
+    rawText.includes('timed out') ||
+    rawText.includes('timeout')
+  );
+}
+
+async function verifyDatabaseConnection(timeoutMs = DB_CONNECT_TIMEOUT_MS) {
+  if (!supaClient) {
+    return { ok: false, reason: 'Klien pangkalan data gagal dimulakan.' };
+  }
+
+  const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+  const timeoutId = controller ? setTimeout(() => controller.abort(), timeoutMs) : null;
+
+  try {
+    let query = supaClient
+      .from('v_bookings_active')
+      .select('*', { head: true, count: 'exact' })
+      .limit(1);
+
+    if (controller && typeof query.abortSignal === 'function') {
+      query = query.abortSignal(controller.signal);
+    }
+
+    const { error } = await query;
+    if (error) {
+      return {
+        ok: false,
+        reason: error.message || 'Sambungan ke pangkalan data gagal disahkan.'
+      };
+    }
+
+    return { ok: true };
+  } catch (err) {
+    const reason = err && err.name === 'AbortError'
+      ? 'Sambungan ke pelayan pangkalan data tamat masa.'
+      : ((err && err.message) || 'Tidak dapat menghubungi pelayan pangkalan data.');
+    return { ok: false, reason };
+  } finally {
+    if (timeoutId !== null) {
+      clearTimeout(timeoutId);
+    }
+  }
+}
+
+function ensureMaintenanceOverlay() {
+  if (typeof document === 'undefined' || !document.body) return null;
+
+  let overlay = $('maintenanceOverlay');
+  if (!overlay) {
+    overlay = createEl('div', 'maintenance-overlay');
+    overlay.id = 'maintenanceOverlay';
+    overlay.setAttribute('role', 'alertdialog');
+    overlay.setAttribute('aria-modal', 'true');
+    overlay.setAttribute('aria-labelledby', 'maintenanceTitle');
+    overlay.setAttribute('aria-describedby', 'maintenanceMessage');
+
+    const card = createEl('div', 'maintenance-card');
+
+    const logo = document.createElement('img');
+    logo.src = 'assets/img/logo-kpm.png';
+    logo.alt = 'Logo KPM';
+    logo.className = 'maintenance-logo';
+    card.appendChild(logo);
+
+    const badge = createEl('div', 'maintenance-badge');
+    badge.textContent = 'PENYELENGGARAAN SISTEM';
+    card.appendChild(badge);
+
+    const title = createEl('h2', 'maintenance-title');
+    title.id = 'maintenanceTitle';
+    title.textContent = 'Sistem Sedang Diselenggara';
+    card.appendChild(title);
+
+    const msg = createEl('p', 'maintenance-message');
+    msg.id = 'maintenanceMessage';
+    msg.textContent = MAINTENANCE_PRIMARY_MESSAGE;
+    card.appendChild(msg);
+
+    const detail = createEl('p', 'maintenance-detail');
+    detail.id = 'maintenanceDetail';
+    detail.style.display = 'none';
+    card.appendChild(detail);
+
+    const actions = createEl('div', 'maintenance-actions');
+    const retryBtn = createEl('button', 'btn');
+    retryBtn.id = 'btnRetryDbConnection';
+    retryBtn.type = 'button';
+    retryBtn.textContent = 'Cuba Semula Sambungan';
+    actions.appendChild(retryBtn);
+    card.appendChild(actions);
+
+    overlay.appendChild(card);
+    document.body.appendChild(overlay);
+  }
+
+  const retryButton = $('btnRetryDbConnection');
+  if (retryButton && retryButton.dataset.bound !== '1') {
+    retryButton.dataset.bound = '1';
+    retryButton.addEventListener('click', retryDatabaseConnection);
+  }
+
+  return overlay;
+}
+
+function activateMaintenanceMode(detailReason = '') {
+  state.isDatabaseUnavailable = true;
+  modalClose();
+
+  if (adminSearchAbortController) {
+    adminSearchAbortController.abort();
+    adminSearchAbortController = null;
+  }
+  if (adminBookingListAbortController) {
+    adminBookingListAbortController.abort();
+    adminBookingListAbortController = null;
+  }
+  if (adminUserListAbortController) {
+    adminUserListAbortController.abort();
+    adminUserListAbortController = null;
+  }
+  abortMigrationOperations();
+
+  if (supaClient) {
+    teardownRealtime(supaClient).catch(() => {});
+  }
+
+  const mainWrap = document.querySelector('main.wrap') || document.querySelector('.wrap');
+  if (mainWrap) {
+    mainWrap.classList.add('maintenance-locked');
+    mainWrap.setAttribute('aria-hidden', 'true');
+    mainWrap.setAttribute('inert', '');
+  }
+
+  const overlay = ensureMaintenanceOverlay();
+  if (!overlay) return;
+
+  const messageEl = $('maintenanceMessage');
+  if (messageEl) {
+    messageEl.textContent = MAINTENANCE_PRIMARY_MESSAGE;
+  }
+
+  const detailEl = $('maintenanceDetail');
+  if (detailEl) {
+    const cleanReason = String(detailReason || '').trim();
+    if (cleanReason) {
+      detailEl.textContent = `Butiran Sambungan: ${cleanReason}`;
+      detailEl.style.display = 'block';
+    } else {
+      detailEl.textContent = '';
+      detailEl.style.display = 'none';
+    }
+  }
+
+  overlay.removeAttribute('hidden');
+  overlay.style.display = 'flex';
+
+  const retryBtn = $('btnRetryDbConnection');
+  if (retryBtn) {
+    retryBtn.disabled = false;
+    retryBtn.textContent = 'Cuba Semula Sambungan';
+    retryBtn.focus();
+  }
+}
+
+function deactivateMaintenanceMode() {
+  state.isDatabaseUnavailable = false;
+
+  const mainWrap = document.querySelector('main.wrap') || document.querySelector('.wrap');
+  if (mainWrap) {
+    mainWrap.classList.remove('maintenance-locked');
+    mainWrap.removeAttribute('aria-hidden');
+    mainWrap.removeAttribute('inert');
+  }
+
+  const overlay = $('maintenanceOverlay');
+  if (overlay) {
+    overlay.setAttribute('hidden', '');
+    overlay.style.display = 'none';
+  }
+}
+
+async function refreshServerEnvironmentConfig() {
+  const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+  const timeoutId = controller ? setTimeout(() => controller.abort(), DB_CONNECT_TIMEOUT_MS) : null;
+
+  try {
+    const opts = {
+      method: 'GET',
+      headers: { Accept: 'application/json' },
+      cache: 'no-store'
+    };
+    if (controller) opts.signal = controller.signal;
+
+    const response = await fetch('/api/config', opts);
+    const data = await response.json().catch(() => null);
+
+    if (!response.ok || !data || typeof data !== 'object' || Array.isArray(data)) {
+      const errMsg = data && typeof data.error === 'string' && data.error.trim()
+        ? data.error.trim()
+        : 'Konfigurasi pelayan tidak tersedia.';
+      throw new Error(errMsg);
+    }
+
+    const resolvedConfig = {
+      SUPABASE_URL: String(data.SUPABASE_URL || '').trim(),
+      SUPABASE_ANON_KEY: String(data.SUPABASE_ANON_KEY || '').trim(),
+      SUPABASE_SCHEMA: String(data.SUPABASE_SCHEMA || 'erom_ag').trim() || 'erom_ag',
+      GAS_ENDPOINT_URL: String(data.GAS_ENDPOINT_URL || '').trim()
+    };
+
+    if (!resolvedConfig.SUPABASE_URL || !resolvedConfig.SUPABASE_ANON_KEY) {
+      throw new Error('Konfigurasi sambungan pangkalan data tidak lengkap.');
+    }
+
+    window.__ENV = Object.freeze(resolvedConfig);
+    window.ENV_READY = Promise.resolve(window.__ENV);
+    return window.__ENV;
+  } finally {
+    if (timeoutId !== null) {
+      clearTimeout(timeoutId);
+    }
+  }
+}
+
+async function retryDatabaseConnection() {
+  if (isRetryingConnection) return;
+  isRetryingConnection = true;
+
+  const retryBtn = $('btnRetryDbConnection');
+  if (retryBtn) {
+    retryBtn.disabled = true;
+    retryBtn.textContent = 'Menyemak Sambungan...';
+  }
+
+  try {
+    const currentEnv = typeof window !== 'undefined' && window.__ENV ? window.__ENV : {};
+    if (!currentEnv.SUPABASE_URL || !currentEnv.SUPABASE_ANON_KEY) {
+      await refreshServerEnvironmentConfig();
+    }
+
+    if (!supaClient) {
+      supaClient = await getSupabaseClient();
+    }
+
+    const health = await verifyDatabaseConnection(DB_CONNECT_TIMEOUT_MS);
+    if (!health.ok) {
+      activateMaintenanceMode(health.reason);
+      toastErr('Pangkalan data masih belum dapat disambung.');
+      return;
+    }
+
+    deactivateMaintenanceMode();
+    await initializeAppData();
+    toastOk('Sambungan pangkalan data berjaya dipulihkan.');
+  } catch (err) {
+    const reason = err && err.message ? err.message : 'Gagal menyambung ke pangkalan data.';
+    activateMaintenanceMode(reason);
+    toastErr('Pangkalan data masih belum dapat disambung.');
+  } finally {
+    isRetryingConnection = false;
+    if (retryBtn && state.isDatabaseUnavailable) {
+      retryBtn.disabled = false;
+      retryBtn.textContent = 'Cuba Semula Sambungan';
+    }
+  }
+}
 
 function registerServiceWorker() {
   if (typeof navigator !== 'undefined' && 'serviceWorker' in navigator) {
@@ -544,55 +884,75 @@ function registerServiceWorker() {
 
 window.addEventListener('load', bootstrap);
 
+async function initializeAppData() {
+  await restoreSession();
+  if (state.isDatabaseUnavailable) return;
+
+  setupAuthStateListener();
+  clearExpiredCache().catch(() => {});
+
+  if (!isDropdownsInitialized) {
+    const roomSel = $('roomSelect');
+    const adminRoomSel = $('adminRoom');
+    const adminSearchRoomSel = $('adminSearchRoom');
+    ROOM_OPTIONS.forEach(r => {
+      if (roomSel) roomSel.appendChild(new Option(r, r));
+      if (adminRoomSel) adminRoomSel.appendChild(new Option(r, r));
+      if (adminSearchRoomSel) adminSearchRoomSel.appendChild(new Option(r, r));
+    });
+
+    const catSel = $('category');
+    if (catSel) {
+      CATEGORY_OPTIONS.forEach(c => catSel.appendChild(new Option(c, c)));
+    }
+
+    const ovRoomFilter = $('ovRoomFilter');
+    if (ovRoomFilter) {
+      ROOM_OPTIONS.forEach(r => ovRoomFilter.appendChild(new Option(r, r)));
+    }
+
+    isDropdownsInitialized = true;
+  }
+
+  toggleCalendarHint();
+  setupRealtimeSubscription();
+  await loadOverview(true);
+}
+
 async function bootstrap() {
   if (isBootstrapped) return;
   isBootstrapped = true;
 
   registerServiceWorker();
+  ensureMaintenanceOverlay();
   setupUI();
 
   if (window.ENV_READY) {
     try {
       await window.ENV_READY;
-    } catch {
-      await modalAlert('Ralat Konfigurasi', 'Konfigurasi pelayan tidak lengkap. Sila hubungi pentadbir sistem.');
+    } catch (err) {
+      const reason = err && err.message ? err.message : 'Konfigurasi pelayan tidak lengkap.';
+      activateMaintenanceMode(reason);
       return;
     }
   }
 
   try {
     supaClient = await getSupabaseClient();
-  } catch {
-    await modalAlert('Ralat Permulaan', 'Gagal menyambung ke pangkalan data. Sila muat semula halaman.');
+  } catch (err) {
+    const reason = err && err.message ? err.message : 'Gagal memulakan klien pangkalan data.';
+    activateMaintenanceMode(reason);
     return;
   }
 
-  await restoreSession();
-  setupAuthStateListener();
-  clearExpiredCache().catch(() => {});
-
-  const roomSel = $('roomSelect');
-  const adminRoomSel = $('adminRoom');
-  const adminSearchRoomSel = $('adminSearchRoom');
-  ROOM_OPTIONS.forEach(r => {
-    if (roomSel) roomSel.appendChild(new Option(r, r));
-    if (adminRoomSel) adminRoomSel.appendChild(new Option(r, r));
-    if (adminSearchRoomSel) adminSearchRoomSel.appendChild(new Option(r, r));
-  });
-
-  const catSel = $('category');
-  if (catSel) {
-    CATEGORY_OPTIONS.forEach(c => catSel.appendChild(new Option(c, c)));
+  const dbHealth = await verifyDatabaseConnection(DB_CONNECT_TIMEOUT_MS);
+  if (!dbHealth.ok) {
+    activateMaintenanceMode(dbHealth.reason);
+    return;
   }
 
-  const ovRoomFilter = $('ovRoomFilter');
-  if (ovRoomFilter) {
-    ROOM_OPTIONS.forEach(r => ovRoomFilter.appendChild(new Option(r, r)));
-  }
-
-  toggleCalendarHint();
-  setupRealtimeSubscription();
-  await loadOverview(true);
+  deactivateMaintenanceMode();
+  await initializeAppData();
 }
 
 function setupAuthStateListener() {
@@ -605,6 +965,7 @@ function setupAuthStateListener() {
   }
 
   const { data } = supaClient.auth.onAuthStateChange((event, session) => {
+    if (state.isDatabaseUnavailable) return;
     if (session && session.user && !isLegacyBlockedEmail(session.user.email)) {
       if (event === 'TOKEN_REFRESHED' || event === 'SIGNED_IN' || event === 'USER_UPDATED') {
         state.user = buildSuperAdminProfile(session.user);
@@ -624,15 +985,23 @@ function setupAuthStateListener() {
 }
 
 async function syncAllActiveViews() {
+  if (state.isDatabaseUnavailable) return;
+
   await clearActiveCaches();
 
   if (state.room) {
     await refreshCalendar(false);
   }
+  if (state.isDatabaseUnavailable) return;
+
   await loadOverview(false);
+  if (state.isDatabaseUnavailable) return;
+
   if (state.user) {
     await loadMyBookings(false);
   }
+  if (state.isDatabaseUnavailable) return;
+
   if ($('tabAdminSearch') && $('tabAdminSearch').classList.contains('active')) {
     const startVal = $('adminSearchStartDate') ? $('adminSearchStartDate').value : '';
     const endVal = $('adminSearchEndDate') ? $('adminSearchEndDate').value : '';
@@ -643,20 +1012,29 @@ async function syncAllActiveViews() {
 }
 
 function setupRealtimeSubscription() {
-  if (!supaClient) return;
+  if (!supaClient || state.isDatabaseUnavailable) return;
   subscribeBookingsRealtime(
     supaClient,
     async (payload) => {
       await handleRealtimePayload(payload);
     },
     async () => {
+      if (state.isDatabaseUnavailable) return;
+      const health = await verifyDatabaseConnection(DB_CONNECT_TIMEOUT_MS);
+      if (!health.ok) {
+        activateMaintenanceMode(health.reason);
+        return;
+      }
       await syncAllActiveViews();
     }
   );
 }
 
 async function handleRealtimePayload(payload) {
+  if (state.isDatabaseUnavailable) return;
+
   await syncAllActiveViews();
+  if (state.isDatabaseUnavailable) return;
 
   const rec = payload.new || payload.old;
   if (!rec) return;
@@ -679,6 +1057,12 @@ async function handleRealtimePayload(payload) {
 }
 
 function setupUI() {
+  const retryBtn = $('btnRetryDbConnection');
+  if (retryBtn && retryBtn.dataset.bound !== '1') {
+    retryBtn.dataset.bound = '1';
+    retryBtn.addEventListener('click', retryDatabaseConnection);
+  }
+
   const mainLoginBtn = $('mainLoginBtn');
   if (mainLoginBtn) mainLoginBtn.addEventListener('click', showLoginModal);
 
@@ -706,6 +1090,7 @@ function setupUI() {
   const btnRefresh = $('btnRefresh');
   if (btnRefresh) {
     btnRefresh.addEventListener('click', async () => {
+      if (state.isDatabaseUnavailable) return;
       await clearActiveCaches();
       resetUI();
       toastInfo('Antara muka & cache telah ditetapkan semula');
@@ -760,6 +1145,7 @@ function setupUI() {
   const ovRoomFilter = $('ovRoomFilter');
   if (ovRoomFilter) {
     ovRoomFilter.addEventListener('change', () => {
+      if (state.isDatabaseUnavailable) return;
       ov.filterRoom = ovRoomFilter.value;
       ov.filterUser = '';
       const userFilterEl = $('ovUserFilter');
@@ -773,6 +1159,7 @@ function setupUI() {
   const userFilterEl = $('ovUserFilter');
   if (userFilterEl) {
     userFilterEl.addEventListener('change', () => {
+      if (state.isDatabaseUnavailable) return;
       ov.filterUser = userFilterEl.value;
       renderOvTable();
     });
@@ -781,6 +1168,7 @@ function setupUI() {
   const btnRefreshMyBookings = $('btnRefreshMyBookings');
   if (btnRefreshMyBookings) {
     btnRefreshMyBookings.addEventListener('click', async () => {
+      if (state.isDatabaseUnavailable) return;
       await deleteCacheByPrefix('my_');
       loadMyBookings(true);
     });
@@ -814,17 +1202,22 @@ function setupUI() {
   const btnAdminPrintSearch = $('btnAdminPrintSearch');
   if (btnAdminPrintSearch) {
     btnAdminPrintSearch.addEventListener('click', () => {
+      if (state.isDatabaseUnavailable) return;
       window.print();
     });
   }
 
   const adminSearchUserFilter = $('adminSearchUserFilter');
   if (adminSearchUserFilter) {
-    adminSearchUserFilter.addEventListener('change', renderAdminSearchTable);
+    adminSearchUserFilter.addEventListener('change', () => {
+      if (state.isDatabaseUnavailable) return;
+      renderAdminSearchTable();
+    });
   }
 }
 
 async function handleAdminExportJson() {
+  if (state.isDatabaseUnavailable) return;
   const statusEl = $('migrationStatusArea');
 
   if (!isAdminUser()) {
@@ -854,9 +1247,18 @@ async function handleAdminExportJson() {
     if (result && result.ok) {
       toastOk('Fail sandaran JSON berjaya dijana.');
     } else {
-      toastErr((result && result.error) || 'Gagal menjana sandaran JSON.');
+      const errMsg = (result && result.error) || 'Gagal menjana sandaran JSON.';
+      if (isDatabaseConnectionError(errMsg)) {
+        activateMaintenanceMode(errMsg);
+        return;
+      }
+      toastErr(errMsg);
     }
   } catch (err) {
+    if (isDatabaseConnectionError(err)) {
+      activateMaintenanceMode(err.message);
+      return;
+    }
     const msg = err && err.message ? err.message : 'Ralat tidak dijangka semasa mengeksport JSON.';
     renderMigrationStatus(statusEl, { type: 'error', title: 'Eksport Sandaran Gagal', message: msg });
     toastErr(msg);
@@ -867,6 +1269,7 @@ async function handleAdminExportJson() {
 }
 
 async function handleAdminImportJson() {
+  if (state.isDatabaseUnavailable) return;
   const statusEl = $('migrationStatusArea');
 
   if (!isAdminUser()) {
@@ -892,7 +1295,7 @@ async function handleAdminImportJson() {
     'Ya, Pulihkan Data'
   );
 
-  if (!isConfirmed) return;
+  if (!isConfirmed || state.isDatabaseUnavailable) return;
 
   if (btnExportJson) btnExportJson.disabled = true;
   if (btnImportJson) btnImportJson.disabled = true;
@@ -922,9 +1325,18 @@ async function handleAdminImportJson() {
     if (result && result.ok) {
       toastOk('Pemulihan data 1-to-1 selesai dan paparan telah disegarkan.');
     } else {
-      toastErr((result && result.error) || 'Gagal mengimport fail JSON.');
+      const errMsg = (result && result.error) || 'Gagal mengimport fail JSON.';
+      if (isDatabaseConnectionError(errMsg)) {
+        activateMaintenanceMode(errMsg);
+        return;
+      }
+      toastErr(errMsg);
     }
   } catch (err) {
+    if (isDatabaseConnectionError(err)) {
+      activateMaintenanceMode(err.message);
+      return;
+    }
     const msg = err && err.message ? err.message : 'Ralat tidak dijangka semasa mengimport JSON.';
     renderMigrationStatus(statusEl, { type: 'error', title: 'Import / Pemulihan Gagal', message: msg });
     toastErr(msg);
@@ -935,6 +1347,8 @@ async function handleAdminImportJson() {
 }
 
 function resetUI() {
+  if (state.isDatabaseUnavailable) return;
+
   const now = new Date();
   state.year = now.getFullYear();
   state.month = now.getMonth() + 1;
@@ -1037,6 +1451,8 @@ function resetBookingForm(clearFields) {
 }
 
 function changeMonth(obj, delta, refreshCal) {
+  if (state.isDatabaseUnavailable) return;
+
   let m = obj.month + delta;
   let y = obj.year;
   if (m < 1) {
@@ -1063,6 +1479,8 @@ function changeMonth(obj, delta, refreshCal) {
 }
 
 function switchTab(name) {
+  if (state.isDatabaseUnavailable) return;
+
   const targetBtnId = `tab${name.charAt(0).toUpperCase() + name.slice(1)}Btn`;
   const targetPaneId = `tab${name.charAt(0).toUpperCase() + name.slice(1)}`;
 
@@ -1107,6 +1525,8 @@ function getSessionToken() {
 }
 
 async function restoreSession() {
+  if (state.isDatabaseUnavailable) return;
+
   if (supaClient && supaClient.auth && typeof supaClient.auth.getSession === 'function') {
     try {
       const { data: sessionData } = await supaClient.auth.getSession();
@@ -1154,6 +1574,8 @@ async function restoreSession() {
 }
 
 async function showLoginModal() {
+  if (state.isDatabaseUnavailable) return;
+
   const formValues = await modalForm(
     'Log Masuk Pegawai',
     [
@@ -1178,10 +1600,13 @@ async function showLoginModal() {
     'Batal'
   );
 
-  if (!formValues) return;
+  if (!formValues || state.isDatabaseUnavailable) return;
 
   const { email, pass } = formValues;
-  if (!supaClient) return toastErr('Perkhidmatan belum bersedia.');
+  if (!supaClient) {
+    activateMaintenanceMode('Perkhidmatan pangkalan data tidak tersedia.');
+    return;
+  }
 
   if (isLegacyBlockedEmail(email)) {
     return modalAlert('Akses Ditolak', 'Akaun admin@moe.gov.my telah dinyahaktifkan.');
@@ -1189,52 +1614,72 @@ async function showLoginModal() {
 
   modalLoading('Mengesahkan...');
 
-  if (supaClient.auth && typeof supaClient.auth.signInWithPassword === 'function') {
-    const { data: authData, error: authError } = await supaClient.auth.signInWithPassword({
-      email: email.trim(),
-      password: pass
-    });
+  try {
+    if (supaClient.auth && typeof supaClient.auth.signInWithPassword === 'function') {
+      const { data: authData, error: authError } = await supaClient.auth.signInWithPassword({
+        email: email.trim(),
+        password: pass
+      });
 
-    if (!authError && authData && authData.session && authData.user) {
-      modalClose();
-      state.user = buildSuperAdminProfile(authData.user);
-      state.authMode = 'SUPABASE_AUTH';
-      state.sessionToken = authData.session.access_token || null;
-      state.sessionExpiresAt = authData.session.expires_at
-        ? new Date(authData.session.expires_at * 1000).toISOString()
-        : null;
+      if (authError && isDatabaseConnectionError(authError)) {
+        activateMaintenanceMode(authError.message);
+        return;
+      }
 
-      localStorage.setItem('erom_user', JSON.stringify(state.user));
-      if (state.sessionToken) localStorage.setItem('erom_session_token', state.sessionToken);
-      if (state.sessionExpiresAt) localStorage.setItem('erom_session_expires_at', state.sessionExpiresAt);
+      if (!authError && authData && authData.session && authData.user) {
+        modalClose();
+        state.user = buildSuperAdminProfile(authData.user);
+        state.authMode = 'SUPABASE_AUTH';
+        state.sessionToken = authData.session.access_token || null;
+        state.sessionExpiresAt = authData.session.expires_at
+          ? new Date(authData.session.expires_at * 1000).toISOString()
+          : null;
 
-      onLoginSuccess();
-      toastOk(`Selamat datang, ${state.user.nama} (SUPER ADMIN)`);
+        localStorage.setItem('erom_user', JSON.stringify(state.user));
+        if (state.sessionToken) localStorage.setItem('erom_session_token', state.sessionToken);
+        if (state.sessionExpiresAt) localStorage.setItem('erom_session_expires_at', state.sessionExpiresAt);
+
+        onLoginSuccess();
+        toastOk(`Selamat datang, ${state.user.nama} (SUPER ADMIN)`);
+        return;
+      }
+    }
+
+    const { data, error } = await supaClient.rpc('fn_login_secure', { p_email: email, p_password: pass });
+    modalClose();
+
+    if (error) {
+      if (isDatabaseConnectionError(error)) {
+        activateMaintenanceMode(error.message);
+        return;
+      }
+      return modalAlert('Ralat Sistem', error.message);
+    }
+    if (!data || !data.ok) return modalAlert('Gagal', (data && data.error) || 'Log masuk gagal.');
+
+    state.user = data.user;
+    state.authMode = 'LEGACY_RPC';
+    state.sessionToken = data.session_token || null;
+    state.sessionExpiresAt = data.session_expires_at || null;
+
+    if (!state.sessionToken) {
+      return modalAlert('Ralat Sistem', 'Token sesi tidak diterima. Sila hubungi pentadbir.');
+    }
+
+    localStorage.setItem('erom_user', JSON.stringify(state.user));
+    localStorage.setItem('erom_session_token', state.sessionToken);
+    if (state.sessionExpiresAt) localStorage.setItem('erom_session_expires_at', state.sessionExpiresAt);
+
+    onLoginSuccess();
+    toastOk(`Selamat datang, ${state.user.nama}`);
+  } catch (err) {
+    modalClose();
+    if (isDatabaseConnectionError(err)) {
+      activateMaintenanceMode(err.message);
       return;
     }
+    await modalAlert('Ralat Sistem', (err && err.message) || 'Ralat tidak dijangka.');
   }
-
-  const { data, error } = await supaClient.rpc('fn_login_secure', { p_email: email, p_password: pass });
-  modalClose();
-
-  if (error) return modalAlert('Ralat Sistem', error.message);
-  if (!data || !data.ok) return modalAlert('Gagal', (data && data.error) || 'Log masuk gagal.');
-
-  state.user = data.user;
-  state.authMode = 'LEGACY_RPC';
-  state.sessionToken = data.session_token || null;
-  state.sessionExpiresAt = data.session_expires_at || null;
-
-  if (!state.sessionToken) {
-    return modalAlert('Ralat Sistem', 'Token sesi tidak diterima. Sila hubungi pentadbir.');
-  }
-
-  localStorage.setItem('erom_user', JSON.stringify(state.user));
-  localStorage.setItem('erom_session_token', state.sessionToken);
-  if (state.sessionExpiresAt) localStorage.setItem('erom_session_expires_at', state.sessionExpiresAt);
-
-  onLoginSuccess();
-  toastOk(`Selamat datang, ${state.user.nama}`);
 }
 
 function onLoginSuccess() {
@@ -1311,7 +1756,7 @@ async function onLogout() {
     } catch {}
   }
 
-  if (previousAuthMode !== 'SUPABASE_AUTH' && currentSessionToken && supaClient) {
+  if (previousAuthMode !== 'SUPABASE_AUTH' && currentSessionToken && supaClient && !state.isDatabaseUnavailable) {
     try {
       await supaClient.rpc('fn_logout_secure', { p_session_token: currentSessionToken });
     } catch {}
@@ -1388,14 +1833,17 @@ async function onLogout() {
     myBookingsTbody.appendChild(tr);
   }
 
-  if (supaClient) {
+  if (supaClient && !state.isDatabaseUnavailable) {
     setupRealtimeSubscription();
   }
 
-  toastInfo('Log keluar berjaya');
+  if (!state.isDatabaseUnavailable) {
+    toastInfo('Log keluar berjaya');
+  }
 }
 
 function showUserProfile() {
+  if (state.isDatabaseUnavailable) return;
   if (!state.user || typeof document === 'undefined' || !document.body) return;
 
   const { dialog, box } = createBaseDialog(false);
@@ -1461,6 +1909,8 @@ function showUserProfile() {
 }
 
 async function changeOwnPassword() {
+  if (state.isDatabaseUnavailable) return;
+
   const form = await modalForm(
     'Tukar Kata Laluan',
     [
@@ -1485,81 +1935,111 @@ async function changeOwnPassword() {
     'Batal'
   );
 
-  if (!form) return;
-  if (!supaClient) return toastErr('Perkhidmatan tidak tersedia.');
-
-  if (state.authMode === 'SUPABASE_AUTH' && supaClient.auth) {
-    if (!form.newP || form.newP.trim().length < 6) {
-      return modalAlert('Gagal', 'Kata laluan baharu mesti sekurang-kurangnya 6 aksara.');
-    }
-
-    modalLoading('Mengemaskini...');
-    const { error: verifyErr } = await supaClient.auth.signInWithPassword({
-      email: state.user.email,
-      password: form.oldP
-    });
-
-    if (verifyErr) {
-      modalClose();
-      return modalAlert('Gagal', 'Kata laluan lama tidak tepat.');
-    }
-
-    const { data: updatedData, error: updateErr } = await supaClient.auth.updateUser({
-      password: form.newP
-    });
-    modalClose();
-
-    if (updateErr) {
-      return modalAlert('Gagal', updateErr.message || 'Gagal menukar kata laluan.');
-    }
-
-    if (updatedData && updatedData.user) {
-      const { data: latestSession } = await supaClient.auth.getSession();
-      if (latestSession && latestSession.session) {
-        state.sessionToken = latestSession.session.access_token || state.sessionToken;
-        if (state.sessionToken) localStorage.setItem('erom_session_token', state.sessionToken);
-      }
-    }
-
-    await modalAlert('Berjaya', 'Kata laluan Super Admin ditukar.');
+  if (!form || state.isDatabaseUnavailable) return;
+  if (!supaClient) {
+    activateMaintenanceMode('Perkhidmatan pangkalan data tidak tersedia.');
     return;
   }
 
-  modalLoading('Mengemaskini...');
-  const { data } = await supaClient.rpc('fn_change_own_password_v2', {
-    p_email: state.user.email,
-    p_old_pass: form.oldP,
-    p_new_pass: form.newP,
-    p_session_token: getSessionToken()
-  });
-  modalClose();
+  try {
+    if (state.authMode === 'SUPABASE_AUTH' && supaClient.auth) {
+      if (!form.newP || form.newP.trim().length < 6) {
+        return modalAlert('Gagal', 'Kata laluan baharu mesti sekurang-kurangnya 6 aksara.');
+      }
 
-  if (data && data.ok) {
-    await modalAlert('Berjaya', 'Kata laluan ditukar.');
-  } else {
-    await modalAlert('Gagal', (data && data.error) || 'Ralat');
+      modalLoading('Mengemaskini...');
+      const { error: verifyErr } = await supaClient.auth.signInWithPassword({
+        email: state.user.email,
+        password: form.oldP
+      });
+
+      if (verifyErr) {
+        modalClose();
+        if (isDatabaseConnectionError(verifyErr)) {
+          activateMaintenanceMode(verifyErr.message);
+          return;
+        }
+        return modalAlert('Gagal', 'Kata laluan lama tidak tepat.');
+      }
+
+      const { data: updatedData, error: updateErr } = await supaClient.auth.updateUser({
+        password: form.newP
+      });
+      modalClose();
+
+      if (updateErr) {
+        if (isDatabaseConnectionError(updateErr)) {
+          activateMaintenanceMode(updateErr.message);
+          return;
+        }
+        return modalAlert('Gagal', updateErr.message || 'Gagal menukar kata laluan.');
+      }
+
+      if (updatedData && updatedData.user) {
+        const { data: latestSession } = await supaClient.auth.getSession();
+        if (latestSession && latestSession.session) {
+          state.sessionToken = latestSession.session.access_token || state.sessionToken;
+          if (state.sessionToken) localStorage.setItem('erom_session_token', state.sessionToken);
+        }
+      }
+
+      await modalAlert('Berjaya', 'Kata laluan Super Admin ditukar.');
+      return;
+    }
+
+    modalLoading('Mengemaskini...');
+    const { data, error } = await supaClient.rpc('fn_change_own_password_v2', {
+      p_email: state.user.email,
+      p_old_pass: form.oldP,
+      p_new_pass: form.newP,
+      p_session_token: getSessionToken()
+    });
+    modalClose();
+
+    if (error && isDatabaseConnectionError(error)) {
+      activateMaintenanceMode(error.message);
+      return;
+    }
+
+    if (data && data.ok) {
+      await modalAlert('Berjaya', 'Kata laluan ditukar.');
+    } else {
+      await modalAlert('Gagal', (data && data.error) || 'Ralat');
+    }
+  } catch (err) {
+    modalClose();
+    if (isDatabaseConnectionError(err)) {
+      activateMaintenanceMode(err.message);
+      return;
+    }
+    await modalAlert('Ralat', (err && err.message) || 'Ralat');
   }
 }
 
 function toggleBookingForm(enable) {
+  const effectiveEnable = Boolean(enable) && !state.isDatabaseUnavailable;
   const fields = document.querySelectorAll('#bookingFormContainer input, #bookingFormContainer select, #bookingFormContainer button');
-  fields.forEach(f => { f.disabled = !enable; });
+  fields.forEach(f => { f.disabled = !effectiveEnable; });
 
   const loginWarning = $('loginWarning');
-  if (loginWarning) loginWarning.style.display = enable ? 'none' : 'block';
+  if (loginWarning) loginWarning.style.display = effectiveEnable ? 'none' : 'block';
 
   const btnBook = $('btnBook');
-  if (btnBook) btnBook.style.display = enable ? 'inline-block' : 'none';
+  if (btnBook) btnBook.style.display = effectiveEnable ? 'inline-block' : 'none';
 
-  if (enable) {
+  if (effectiveEnable) {
     resetBookingForm(true);
   }
 }
 
 async function onBook() {
+  if (state.isDatabaseUnavailable) return;
   if (isBookingSubmitting) return;
   if (!state.user) return toastErr('Sila log masuk dahulu');
-  if (!supaClient) return toastErr('Perkhidmatan belum bersedia.');
+  if (!supaClient) {
+    activateMaintenanceMode('Perkhidmatan pangkalan data tidak tersedia.');
+    return;
+  }
 
   const pickedDateEl = $('pickedDate');
   const startTimeEl = $('startTime');
@@ -1597,7 +2077,7 @@ async function onBook() {
     : `Sahkan tempahan pada ${inputs.date}?`;
 
   const isConfirmed = await modalConfirm('Sahkan Tempahan?', confirmMsg);
-  if (!isConfirmed) return;
+  if (!isConfirmed || state.isDatabaseUnavailable) return;
 
   isBookingSubmitting = true;
   if (btnBookEl) btnBookEl.disabled = true;
@@ -1634,6 +2114,11 @@ async function onBook() {
 
     modalClose();
 
+    if (res.error && isDatabaseConnectionError(res.error)) {
+      activateMaintenanceMode(res.error.message);
+      return;
+    }
+
     if (res.data && res.data.ok) {
       await modalAlert('Berjaya', 'Tempahan telah direkodkan.');
       await clearActiveCaches();
@@ -1642,18 +2127,24 @@ async function onBook() {
       loadMyBookings(false);
       if (noteEl) noteEl.value = '';
     } else {
-      await modalAlert('Gagal', (res.data && res.data.error) || 'Ralat tidak diketahui');
+      await modalAlert('Gagal', (res.data && res.data.error) || (res.error && res.error.message) || 'Ralat tidak diketahui');
     }
   } catch (e) {
     modalClose();
+    if (isDatabaseConnectionError(e)) {
+      activateMaintenanceMode(e.message);
+      return;
+    }
     await modalAlert('Ralat Rangkaian', e.message);
   } finally {
     isBookingSubmitting = false;
-    if (btnBookEl && state.user) btnBookEl.disabled = false;
+    if (btnBookEl && state.user && !state.isDatabaseUnavailable) btnBookEl.disabled = false;
   }
 }
 
 function onRoomSelectChange(e) {
+  if (state.isDatabaseUnavailable) return;
+
   state.room = e.target.value;
   const pickedDateEl = $('pickedDate');
   const fromDateEl = $('fromDate');
@@ -1678,7 +2169,7 @@ function onRoomSelectChange(e) {
 }
 
 async function refreshCalendar(showLoading) {
-  if (!state.room || !supaClient) return;
+  if (state.isDatabaseUnavailable || !state.room || !supaClient) return;
 
   const start = firstDay(state.year, state.month);
   const end = lastDay(state.year, state.month);
@@ -1709,6 +2200,10 @@ async function refreshCalendar(showLoading) {
     if (showLoading && !hasCachedData) modalClose();
 
     if (error) {
+      if (isDatabaseConnectionError(error)) {
+        activateMaintenanceMode(error.message);
+        return;
+      }
       if (!hasCachedData) toastErr('Gagal memuatkan data');
       return;
     }
@@ -1720,8 +2215,12 @@ async function refreshCalendar(showLoading) {
     if (state.rangeMode) highlightRangeTiles();
 
     setCache(cacheKey, freshData, 300).catch(() => {});
-  } catch {
+  } catch (err) {
     if (showLoading && !hasCachedData) modalClose();
+    if (isDatabaseConnectionError(err)) {
+      activateMaintenanceMode(err.message);
+      return;
+    }
     if (!hasCachedData) toastErr('Ralat rangkaian kalendar');
   }
 }
@@ -1840,6 +2339,8 @@ function buildTile(day) {
 }
 
 function onGridClick(e) {
+  if (state.isDatabaseUnavailable) return;
+
   const tile = e.target.closest('.tile');
   if (!tile || tile.classList.contains('disabled')) return;
   const date = tile.dataset.date;
@@ -1893,6 +2394,8 @@ function onGridClick(e) {
 }
 
 function setRangeMode(on) {
+  if (state.isDatabaseUnavailable) return;
+
   state.rangeMode = on;
   const toggleRangeOn = $('toggleRangeOn');
   const toggleRangeOff = $('toggleRangeOff');
@@ -1922,6 +2425,8 @@ function setRangeMode(on) {
 }
 
 function onDateChange(e) {
+  if (state.isDatabaseUnavailable) return;
+
   state.selectedDate = e.target.value;
   const day = state.days.find(d => d.date === state.selectedDate);
   if (day && day.status === 'red') {
@@ -1962,6 +2467,8 @@ function highlightSelectedTile() {
 }
 
 function onRangeChange() {
+  if (state.isDatabaseUnavailable) return;
+
   const fromDate = $('fromDate');
   const toDate = $('toDate');
   state.range.from = fromDate ? fromDate.value || null : null;
@@ -2001,7 +2508,8 @@ function updateRangeCounter() {
 }
 
 async function loadOverview(loading) {
-  if (!supaClient) return;
+  if (state.isDatabaseUnavailable || !supaClient) return;
+
   const start = firstDay(ov.year, ov.month);
   const end = lastDay(ov.year, ov.month);
   const cacheKey = `ov_${ov.year}_${pad2(ov.month)}`;
@@ -2033,6 +2541,9 @@ async function loadOverview(loading) {
     if (loading && !hasCachedData) modalClose();
 
     if (error) {
+      if (isDatabaseConnectionError(error)) {
+        activateMaintenanceMode(error.message);
+      }
       return;
     }
 
@@ -2044,8 +2555,11 @@ async function loadOverview(loading) {
     renderOvCalendar();
 
     setCache(cacheKey, freshData, 300).catch(() => {});
-  } catch {
+  } catch (err) {
     if (loading && !hasCachedData) modalClose();
+    if (isDatabaseConnectionError(err)) {
+      activateMaintenanceMode(err.message);
+    }
   }
 }
 
@@ -2118,6 +2632,8 @@ function processOverviewData(bookings) {
 }
 
 function switchOverviewView(view) {
+  if (state.isDatabaseUnavailable) return;
+
   ov.view = view;
   const btnViewCalendar = $('btnViewCalendar');
   const btnViewTable = $('btnViewTable');
@@ -2342,6 +2858,8 @@ function renderOvSummary() {
 }
 
 async function cancelBooking(id) {
+  if (state.isDatabaseUnavailable) return;
+
   const isConfirmed = await modalConfirm(
     'HAPUSKAN TEMPAHAN?',
     'Tindakan ini akan memadam rekod anda secara kekal dan tidak boleh dikembalikan.',
@@ -2350,33 +2868,50 @@ async function cancelBooking(id) {
     true
   );
 
-  if (isConfirmed) {
-    if (!supaClient) return toastErr('Perkhidmatan belum bersedia.');
+  if (isConfirmed && !state.isDatabaseUnavailable) {
+    if (!supaClient) {
+      activateMaintenanceMode('Perkhidmatan pangkalan data tidak tersedia.');
+      return;
+    }
     modalLoading('Membatalkan...');
-    const { data } = await supaClient.rpc('fn_cancel_booking_secure_v2', {
-      p_booking_id: id,
-      p_email: state.user.email,
-      p_reason: 'Dibatalkan oleh pengguna',
-      p_session_token: getSessionToken()
-    });
-    modalClose();
+    try {
+      const { data, error } = await supaClient.rpc('fn_cancel_booking_secure_v2', {
+        p_booking_id: id,
+        p_email: state.user.email,
+        p_reason: 'Dibatalkan oleh pengguna',
+        p_session_token: getSessionToken()
+      });
+      modalClose();
 
-    if (data && data.ok) {
-      toastOk('Berjaya dibatalkan');
-      await clearActiveCaches();
-      loadOverview(false);
-      loadMyBookings(false);
-      if (state.room) refreshCalendar(false);
-      const tabAdminSearch = $('tabAdminSearch');
-      if (tabAdminSearch && tabAdminSearch.classList.contains('active')) executeAdminSearch();
-    } else {
-      await modalAlert('Gagal', (data && data.error) || 'Ralat');
+      if (error && isDatabaseConnectionError(error)) {
+        activateMaintenanceMode(error.message);
+        return;
+      }
+
+      if (data && data.ok) {
+        toastOk('Berjaya dibatalkan');
+        await clearActiveCaches();
+        loadOverview(false);
+        loadMyBookings(false);
+        if (state.room) refreshCalendar(false);
+        const tabAdminSearch = $('tabAdminSearch');
+        if (tabAdminSearch && tabAdminSearch.classList.contains('active')) executeAdminSearch();
+      } else {
+        await modalAlert('Gagal', (data && data.error) || (error && error.message) || 'Ralat');
+      }
+    } catch (err) {
+      modalClose();
+      if (isDatabaseConnectionError(err)) {
+        activateMaintenanceMode(err.message);
+        return;
+      }
+      await modalAlert('Ralat', (err && err.message) || 'Ralat');
     }
   }
 }
 
 async function openUnifiedBookingEditModal(booking, titleText, recordId, onAfterUpdate) {
-  if (!booking) return;
+  if (state.isDatabaseUnavailable || !booking) return;
 
   const form = await modalForm(
     titleText,
@@ -2414,42 +2949,61 @@ async function openUnifiedBookingEditModal(booking, titleText, recordId, onAfter
     'Batal'
   );
 
-  if (!form) return;
-  if (!supaClient) return toastErr('Perkhidmatan belum bersedia.');
+  if (!form || state.isDatabaseUnavailable) return;
+  if (!supaClient) {
+    activateMaintenanceMode('Perkhidmatan pangkalan data tidak tersedia.');
+    return;
+  }
 
   const isConfirmed = await modalConfirm(
     'Simpan Perubahan?',
     'Maklumat tempahan asal akan digantikan dengan data baharu.'
   );
-  if (!isConfirmed) return;
+  if (!isConfirmed || state.isDatabaseUnavailable) return;
 
   modalLoading('Menyimpan...');
-  const { data } = await supaClient.rpc('fn_update_booking_secure_v2', {
-    p_booking_id: recordId,
-    p_email: state.user.email,
-    p_date: form.d,
-    p_start: form.s,
-    p_end: form.e,
-    p_category: booking.kategori,
-    p_note: form.n,
-    p_sektor: booking.sektor,
-    p_nama: booking.nama_penempah,
-    p_session_token: getSessionToken()
-  });
-  modalClose();
+  try {
+    const { data, error } = await supaClient.rpc('fn_update_booking_secure_v2', {
+      p_booking_id: recordId,
+      p_email: state.user.email,
+      p_date: form.d,
+      p_start: form.s,
+      p_end: form.e,
+      p_category: booking.kategori,
+      p_note: form.n,
+      p_sektor: booking.sektor,
+      p_nama: booking.nama_penempah,
+      p_session_token: getSessionToken()
+    });
+    modalClose();
 
-  if (data && data.ok) {
-    toastOk('Tempahan berjaya dikemaskini.');
-    await clearActiveCaches();
-    if (typeof onAfterUpdate === 'function') {
-      await onAfterUpdate();
+    if (error && isDatabaseConnectionError(error)) {
+      activateMaintenanceMode(error.message);
+      return;
     }
-  } else {
-    await modalAlert('Ralat', (data && data.error) || 'Ralat tidak diketahui');
+
+    if (data && data.ok) {
+      toastOk('Tempahan berjaya dikemaskini.');
+      await clearActiveCaches();
+      if (typeof onAfterUpdate === 'function') {
+        await onAfterUpdate();
+      }
+    } else {
+      await modalAlert('Ralat', (data && data.error) || (error && error.message) || 'Ralat tidak diketahui');
+    }
+  } catch (err) {
+    modalClose();
+    if (isDatabaseConnectionError(err)) {
+      activateMaintenanceMode(err.message);
+      return;
+    }
+    await modalAlert('Ralat', (err && err.message) || 'Ralat tidak diketahui');
   }
 }
 
 async function openUserEditModal(id) {
+  if (state.isDatabaseUnavailable) return;
+
   let b = ov.bookings.find(x => x.booking_id === id);
   if (!b) b = state.myBookings.find(x => x.booking_id === id);
   if (!b) return;
@@ -2462,7 +3016,7 @@ async function openUserEditModal(id) {
 }
 
 async function loadMyBookings(showLoading) {
-  if (!state.user || !supaClient) return;
+  if (state.isDatabaseUnavailable || !state.user || !supaClient) return;
 
   const today = todayYMD();
   const cacheKey = `my_${encodeURIComponent(state.user.nama)}_${today}`;
@@ -2491,6 +3045,10 @@ async function loadMyBookings(showLoading) {
     if (showLoading && !hasCachedData) modalClose();
 
     if (error) {
+      if (isDatabaseConnectionError(error)) {
+        activateMaintenanceMode(error.message);
+        return;
+      }
       if (!hasCachedData) toastErr('Gagal memuatkan tempahan peribadi.');
       return;
     }
@@ -2500,8 +3058,12 @@ async function loadMyBookings(showLoading) {
     renderMyBookingsTable();
 
     setCache(cacheKey, freshData, 180).catch(() => {});
-  } catch {
+  } catch (err) {
     if (showLoading && !hasCachedData) modalClose();
+    if (isDatabaseConnectionError(err)) {
+      activateMaintenanceMode(err.message);
+      return;
+    }
     if (!hasCachedData) toastErr('Ralat rangkaian tempahan saya');
   }
 }
@@ -2580,6 +3142,8 @@ function renderMyBookingsTable() {
 }
 
 async function adminAddUser() {
+  if (state.isDatabaseUnavailable) return;
+
   const formValues = await modalForm(
     'Tambah Pegawai Baharu',
     [
@@ -2620,31 +3184,50 @@ async function adminAddUser() {
     'Batal'
   );
 
-  if (!formValues) return;
-  if (!supaClient) return toastErr('Perkhidmatan belum bersedia.');
+  if (!formValues || state.isDatabaseUnavailable) return;
+  if (!supaClient) {
+    activateMaintenanceMode('Perkhidmatan pangkalan data tidak tersedia.');
+    return;
+  }
 
   modalLoading('Mendaftar Pegawai...');
 
-  const { data } = await supaClient.rpc('fn_admin_create_user_v2', {
-    p_admin_email: state.user.email,
-    p_session_token: getSessionToken(),
-    p_new_email: formValues.email,
-    p_new_password: formValues.pass,
-    p_new_name: formValues.nama,
-    p_new_sektor: formValues.sektor
-  });
+  try {
+    const { data, error } = await supaClient.rpc('fn_admin_create_user_v2', {
+      p_admin_email: state.user.email,
+      p_session_token: getSessionToken(),
+      p_new_email: formValues.email,
+      p_new_password: formValues.pass,
+      p_new_name: formValues.nama,
+      p_new_sektor: formValues.sektor
+    });
 
-  modalClose();
+    modalClose();
 
-  if (data && data.ok) {
-    await modalAlert('Berjaya', 'Pegawai baharu telah didaftarkan.');
-    loadAdminUserList();
-  } else {
-    await modalAlert('Gagal', (data && data.error) || 'Ralat semasa mendaftar pegawai');
+    if (error && isDatabaseConnectionError(error)) {
+      activateMaintenanceMode(error.message);
+      return;
+    }
+
+    if (data && data.ok) {
+      await modalAlert('Berjaya', 'Pegawai baharu telah didaftarkan.');
+      loadAdminUserList();
+    } else {
+      await modalAlert('Gagal', (data && data.error) || (error && error.message) || 'Ralat semasa mendaftar pegawai');
+    }
+  } catch (err) {
+    modalClose();
+    if (isDatabaseConnectionError(err)) {
+      activateMaintenanceMode(err.message);
+      return;
+    }
+    await modalAlert('Gagal', (err && err.message) || 'Ralat semasa mendaftar pegawai');
   }
 }
 
 async function loadAdminUserList() {
+  if (state.isDatabaseUnavailable) return;
+
   const tbody = $('adminUserListBody');
   if (!tbody || !supaClient || !state.user) return;
 
@@ -2664,114 +3247,148 @@ async function loadAdminUserList() {
   loadingTr.appendChild(loadingTd);
   tbody.appendChild(loadingTr);
 
-  const { data, error } = await supaClient.rpc('fn_get_all_users_secure_v2', {
-    p_email: state.user.email,
-    p_session_token: getSessionToken()
-  });
+  try {
+    const { data, error } = await supaClient.rpc('fn_get_all_users_secure_v2', {
+      p_email: state.user.email,
+      p_session_token: getSessionToken()
+    });
 
-  if (controller.signal.aborted) return;
+    if (controller.signal.aborted || state.isDatabaseUnavailable) return;
 
-  clearElementChildren(tbody);
+    if (error && isDatabaseConnectionError(error)) {
+      activateMaintenanceMode(error.message);
+      return;
+    }
 
-  if (error || !data || !data.ok) {
-    const tr = document.createElement('tr');
-    const td = document.createElement('td');
-    td.colSpan = 4;
-    td.style.cssText = 'text-align:center;color:red';
-    td.textContent = 'Gagal akses data pengguna.';
-    tr.appendChild(td);
-    tbody.appendChild(tr);
-    return;
+    clearElementChildren(tbody);
+
+    if (error || !data || !data.ok) {
+      const tr = document.createElement('tr');
+      const td = document.createElement('td');
+      td.colSpan = 4;
+      td.style.cssText = 'text-align:center;color:red';
+      td.textContent = 'Gagal akses data pengguna.';
+      tr.appendChild(td);
+      tbody.appendChild(tr);
+      return;
+    }
+
+    const users = data.data;
+
+    if (!users || users.length === 0) {
+      const tr = document.createElement('tr');
+      const td = document.createElement('td');
+      td.colSpan = 4;
+      td.style.cssText = 'text-align:center;padding:15px';
+      td.textContent = 'Tiada pengguna ditemui.';
+      tr.appendChild(td);
+      tbody.appendChild(tr);
+      return;
+    }
+
+    const docFrag = document.createDocumentFragment();
+
+    users.forEach(u => {
+      const tr = document.createElement('tr');
+      tr.style.borderBottom = '1px solid #f1f5f9';
+
+      const tdNama = document.createElement('td');
+      tdNama.style.padding = '10px';
+      tdNama.textContent = u.nama;
+      tr.appendChild(tdNama);
+
+      const tdSektor = document.createElement('td');
+      tdSektor.style.padding = '10px';
+      tdSektor.textContent = u.sektor;
+      tr.appendChild(tdSektor);
+
+      const tdEmail = document.createElement('td');
+      tdEmail.style.padding = '10px';
+      tdEmail.textContent = u.email;
+      tr.appendChild(tdEmail);
+
+      const tdAction = document.createElement('td');
+      tdAction.style.cssText = 'padding:10px; text-align:center; white-space:nowrap;';
+
+      const btnReset = document.createElement('button');
+      btnReset.type = 'button';
+      btnReset.className = 'btn-reset';
+      btnReset.dataset.id = u.id;
+      btnReset.dataset.email = u.email;
+      btnReset.textContent = 'Reset';
+      btnReset.onclick = () => adminResetPassword(btnReset.dataset.id, btnReset.dataset.email);
+      tdAction.appendChild(btnReset);
+
+      const btnDel = document.createElement('button');
+      btnDel.type = 'button';
+      btnDel.className = 'btn-reset btn-delete-user';
+      btnDel.dataset.id = u.id;
+      btnDel.dataset.email = u.email;
+      btnDel.textContent = 'Buang';
+      btnDel.style.cssText = 'color:var(--bad); border-color:var(--bad); margin-left:5px;';
+      btnDel.onclick = () => adminDeleteUser(btnDel.dataset.id, btnDel.dataset.email);
+      tdAction.appendChild(btnDel);
+
+      tr.appendChild(tdAction);
+      docFrag.appendChild(tr);
+    });
+
+    tbody.appendChild(docFrag);
+  } catch (err) {
+    if (controller.signal.aborted) return;
+    if (isDatabaseConnectionError(err)) {
+      activateMaintenanceMode(err.message);
+    }
   }
-
-  const users = data.data;
-
-  if (!users || users.length === 0) {
-    const tr = document.createElement('tr');
-    const td = document.createElement('td');
-    td.colSpan = 4;
-    td.style.cssText = 'text-align:center;padding:15px';
-    td.textContent = 'Tiada pengguna ditemui.';
-    tr.appendChild(td);
-    tbody.appendChild(tr);
-    return;
-  }
-
-  const docFrag = document.createDocumentFragment();
-
-  users.forEach(u => {
-    const tr = document.createElement('tr');
-    tr.style.borderBottom = '1px solid #f1f5f9';
-
-    const tdNama = document.createElement('td');
-    tdNama.style.padding = '10px';
-    tdNama.textContent = u.nama;
-    tr.appendChild(tdNama);
-
-    const tdSektor = document.createElement('td');
-    tdSektor.style.padding = '10px';
-    tdSektor.textContent = u.sektor;
-    tr.appendChild(tdSektor);
-
-    const tdEmail = document.createElement('td');
-    tdEmail.style.padding = '10px';
-    tdEmail.textContent = u.email;
-    tr.appendChild(tdEmail);
-
-    const tdAction = document.createElement('td');
-    tdAction.style.cssText = 'padding:10px; text-align:center; white-space:nowrap;';
-
-    const btnReset = document.createElement('button');
-    btnReset.type = 'button';
-    btnReset.className = 'btn-reset';
-    btnReset.dataset.id = u.id;
-    btnReset.dataset.email = u.email;
-    btnReset.textContent = 'Reset';
-    btnReset.onclick = () => adminResetPassword(btnReset.dataset.id, btnReset.dataset.email);
-    tdAction.appendChild(btnReset);
-
-    const btnDel = document.createElement('button');
-    btnDel.type = 'button';
-    btnDel.className = 'btn-reset btn-delete-user';
-    btnDel.dataset.id = u.id;
-    btnDel.dataset.email = u.email;
-    btnDel.textContent = 'Buang';
-    btnDel.style.cssText = 'color:var(--bad); border-color:var(--bad); margin-left:5px;';
-    btnDel.onclick = () => adminDeleteUser(btnDel.dataset.id, btnDel.dataset.email);
-    tdAction.appendChild(btnDel);
-
-    tr.appendChild(tdAction);
-    docFrag.appendChild(tr);
-  });
-
-  tbody.appendChild(docFrag);
 }
 
 async function adminResetPassword(id, email) {
+  if (state.isDatabaseUnavailable) return;
+
   const isConfirmed = await modalConfirm(
     'Reset Kata Laluan?',
     `Reset password ${email} kepada 'ppdag@12345'?`,
     'Ya, Reset'
   );
 
-  if (isConfirmed) {
-    if (!supaClient) return toastErr('Perkhidmatan belum bersedia.');
+  if (isConfirmed && !state.isDatabaseUnavailable) {
+    if (!supaClient) {
+      activateMaintenanceMode('Perkhidmatan pangkalan data tidak tersedia.');
+      return;
+    }
     modalLoading('Memproses...');
-    const { data } = await supaClient.rpc('fn_admin_reset_password_v2', {
-      p_admin_email: state.user.email,
-      p_target_id: id,
-      p_session_token: getSessionToken()
-    });
-    modalClose();
-    if (data && data.ok) {
-      await modalAlert('Berjaya', 'Kata laluan telah ditetapkan semula.');
-    } else {
-      await modalAlert('Gagal', (data && data.error) || 'Ralat tidak diketahui');
+    try {
+      const { data, error } = await supaClient.rpc('fn_admin_reset_password_v2', {
+        p_admin_email: state.user.email,
+        p_target_id: id,
+        p_session_token: getSessionToken()
+      });
+      modalClose();
+
+      if (error && isDatabaseConnectionError(error)) {
+        activateMaintenanceMode(error.message);
+        return;
+      }
+
+      if (data && data.ok) {
+        await modalAlert('Berjaya', 'Kata laluan telah ditetapkan semula.');
+      } else {
+        await modalAlert('Gagal', (data && data.error) || (error && error.message) || 'Ralat tidak diketahui');
+      }
+    } catch (err) {
+      modalClose();
+      if (isDatabaseConnectionError(err)) {
+        activateMaintenanceMode(err.message);
+        return;
+      }
+      await modalAlert('Gagal', (err && err.message) || 'Ralat tidak diketahui');
     }
   }
 }
 
 async function adminDeleteUser(id, email) {
+  if (state.isDatabaseUnavailable) return;
+
   if (email === state.user.email) {
     return modalAlert('Tidak Dibenarkan', 'Anda tidak boleh membuang akaun anda sendiri.');
   }
@@ -2784,28 +3401,47 @@ async function adminDeleteUser(id, email) {
     true
   );
 
-  if (isConfirmed) {
-    if (!supaClient) return toastErr('Perkhidmatan belum bersedia.');
+  if (isConfirmed && !state.isDatabaseUnavailable) {
+    if (!supaClient) {
+      activateMaintenanceMode('Perkhidmatan pangkalan data tidak tersedia.');
+      return;
+    }
     modalLoading('Memadam akaun...');
 
-    const { data } = await supaClient.rpc('fn_admin_delete_user_v2', {
-      p_admin_email: state.user.email,
-      p_session_token: getSessionToken(),
-      p_target_id: id
-    });
+    try {
+      const { data, error } = await supaClient.rpc('fn_admin_delete_user_v2', {
+        p_admin_email: state.user.email,
+        p_session_token: getSessionToken(),
+        p_target_id: id
+      });
 
-    modalClose();
+      modalClose();
 
-    if (data && data.ok) {
-      toastOk('Akaun pegawai telah dipadam.');
-      loadAdminUserList();
-    } else {
-      await modalAlert('Gagal', (data && data.error) || 'Ralat semasa memadam pegawai');
+      if (error && isDatabaseConnectionError(error)) {
+        activateMaintenanceMode(error.message);
+        return;
+      }
+
+      if (data && data.ok) {
+        toastOk('Akaun pegawai telah dipadam.');
+        loadAdminUserList();
+      } else {
+        await modalAlert('Gagal', (data && data.error) || (error && error.message) || 'Ralat semasa memadam pegawai');
+      }
+    } catch (err) {
+      modalClose();
+      if (isDatabaseConnectionError(err)) {
+        activateMaintenanceMode(err.message);
+        return;
+      }
+      await modalAlert('Gagal', (err && err.message) || 'Ralat semasa memadam pegawai');
     }
   }
 }
 
 async function loadAdminBookingList() {
+  if (state.isDatabaseUnavailable) return;
+
   const adminRoom = $('adminRoom');
   const room = adminRoom ? adminRoom.value : '';
   if (!room) return toastWarn('Sila pilih bilik dahulu');
@@ -2826,123 +3462,137 @@ async function loadAdminBookingList() {
   loadingDiv.textContent = 'Memuatkan...';
   listDiv.appendChild(loadingDiv);
 
-  const { data } = await supaClient.rpc('fn_admin_list_bookings_v2', {
-    p_email: state.user.email,
-    p_bilik: room,
-    p_session_token: getSessionToken()
-  });
-
-  if (controller.signal.aborted) return;
-
-  clearElementChildren(listDiv);
-
-  if (!data || !data.ok) {
-    const errorDiv = document.createElement('div');
-    errorDiv.style.color = 'red';
-    errorDiv.textContent = 'Ralat memuatkan data.';
-    listDiv.appendChild(errorDiv);
-    return;
-  }
-
-  const bookings = data.data;
-  adminState.bookings = bookings;
-
-  if (bookings.length === 0) {
-    const emptyDiv = document.createElement('div');
-    emptyDiv.style.cssText = 'padding:10px;text-align:center';
-    emptyDiv.textContent = 'Tiada tempahan akan datang.';
-    listDiv.appendChild(emptyDiv);
-    return;
-  }
-
-  const table = document.createElement('table');
-  table.style.cssText = 'width:100%; border-collapse:collapse; font-size:0.85rem;';
-
-  const thead = document.createElement('thead');
-  const trHead = document.createElement('tr');
-  trHead.style.cssText = 'background:#f8fafc; text-align:left;';
-
-  const thChk = document.createElement('th');
-  thChk.style.cssText = 'padding:8px;width:30px';
-  const chkAll = document.createElement('input');
-  chkAll.type = 'checkbox';
-  chkAll.id = 'chkAllDynamic';
-  thChk.appendChild(chkAll);
-  trHead.appendChild(thChk);
-
-  ['Tarikh', 'Masa', 'Tujuan', 'Penempah', 'Edit'].forEach((text, i) => {
-    const th = document.createElement('th');
-    th.style.padding = '8px';
-    if (i === 4) th.style.textAlign = 'center';
-    th.textContent = text;
-    trHead.appendChild(th);
-  });
-
-  thead.appendChild(trHead);
-  table.appendChild(thead);
-
-  const tbody = document.createElement('tbody');
-
-  bookings.forEach(b => {
-    const tr = document.createElement('tr');
-    tr.style.borderBottom = '1px solid #eee';
-
-    const tdChk = document.createElement('td');
-    tdChk.style.cssText = 'padding:8px;text-align:center';
-    const chk = document.createElement('input');
-    chk.type = 'checkbox';
-    chk.className = 'chk-item';
-    chk.value = b.id;
-    tdChk.appendChild(chk);
-    tr.appendChild(tdChk);
-
-    const tdTarikh = document.createElement('td');
-    tdTarikh.style.padding = '8px';
-    tdTarikh.textContent = b.tarikh;
-    tr.appendChild(tdTarikh);
-
-    const tdMasa = document.createElement('td');
-    tdMasa.style.padding = '8px';
-    tdMasa.textContent = `${toHHMM(b.masa_mula)}-${toHHMM(b.masa_tamat)}`;
-    tr.appendChild(tdMasa);
-
-    const tdTujuan = document.createElement('td');
-    tdTujuan.style.padding = '8px';
-    tdTujuan.textContent = b.tujuan;
-    tr.appendChild(tdTujuan);
-
-    const tdPenempah = document.createElement('td');
-    tdPenempah.style.padding = '8px';
-    tdPenempah.textContent = b.nama_penempah;
-    tr.appendChild(tdPenempah);
-
-    const tdAction = document.createElement('td');
-    tdAction.style.cssText = 'padding:8px;text-align:center';
-    const btnEdit = document.createElement('button');
-    btnEdit.type = 'button';
-    btnEdit.className = 'btn-edit';
-    btnEdit.dataset.id = b.id;
-    btnEdit.style.cssText = 'border:none;background:none;cursor:pointer;min-height:36px;';
-    btnEdit.textContent = '✏️';
-    btnEdit.onclick = () => openEditModal(btnEdit.dataset.id);
-    tdAction.appendChild(btnEdit);
-    tr.appendChild(tdAction);
-
-    tbody.appendChild(tr);
-  });
-
-  table.appendChild(tbody);
-  listDiv.appendChild(table);
-
-  const chkAllDynamic = $('chkAllDynamic');
-  if (chkAllDynamic) {
-    chkAllDynamic.addEventListener('change', (e) => {
-      document.querySelectorAll('.chk-item').forEach(c => { c.checked = e.target.checked; });
+  try {
+    const { data, error } = await supaClient.rpc('fn_admin_list_bookings_v2', {
+      p_email: state.user.email,
+      p_bilik: room,
+      p_session_token: getSessionToken()
     });
+
+    if (controller.signal.aborted || state.isDatabaseUnavailable) return;
+
+    if (error && isDatabaseConnectionError(error)) {
+      activateMaintenanceMode(error.message);
+      return;
+    }
+
+    clearElementChildren(listDiv);
+
+    if (!data || !data.ok) {
+      const errorDiv = document.createElement('div');
+      errorDiv.style.color = 'red';
+      errorDiv.textContent = 'Ralat memuatkan data.';
+      listDiv.appendChild(errorDiv);
+      return;
+    }
+
+    const bookings = data.data;
+    adminState.bookings = bookings;
+
+    if (bookings.length === 0) {
+      const emptyDiv = document.createElement('div');
+      emptyDiv.style.cssText = 'padding:10px;text-align:center';
+      emptyDiv.textContent = 'Tiada tempahan akan datang.';
+      listDiv.appendChild(emptyDiv);
+      return;
+    }
+
+    const table = document.createElement('table');
+    table.style.cssText = 'width:100%; border-collapse:collapse; font-size:0.85rem;';
+
+    const thead = document.createElement('thead');
+    const trHead = document.createElement('tr');
+    trHead.style.cssText = 'background:#f8fafc; text-align:left;';
+
+    const thChk = document.createElement('th');
+    thChk.style.cssText = 'padding:8px;width:30px';
+    const chkAll = document.createElement('input');
+    chkAll.type = 'checkbox';
+    chkAll.id = 'chkAllDynamic';
+    thChk.appendChild(chkAll);
+    trHead.appendChild(thChk);
+
+    ['Tarikh', 'Masa', 'Tujuan', 'Penempah', 'Edit'].forEach((text, i) => {
+      const th = document.createElement('th');
+      th.style.padding = '8px';
+      if (i === 4) th.style.textAlign = 'center';
+      th.textContent = text;
+      trHead.appendChild(th);
+    });
+
+    thead.appendChild(trHead);
+    table.appendChild(thead);
+
+    const tbody = document.createElement('tbody');
+
+    bookings.forEach(b => {
+      const tr = document.createElement('tr');
+      tr.style.borderBottom = '1px solid #eee';
+
+      const tdChk = document.createElement('td');
+      tdChk.style.cssText = 'padding:8px;text-align:center';
+      const chk = document.createElement('input');
+      chk.type = 'checkbox';
+      chk.className = 'chk-item';
+      chk.value = b.id;
+      tdChk.appendChild(chk);
+      tr.appendChild(tdChk);
+
+      const tdTarikh = document.createElement('td');
+      tdTarikh.style.padding = '8px';
+      tdTarikh.textContent = b.tarikh;
+      tr.appendChild(tdTarikh);
+
+      const tdMasa = document.createElement('td');
+      tdMasa.style.padding = '8px';
+      tdMasa.textContent = `${toHHMM(b.masa_mula)}-${toHHMM(b.masa_tamat)}`;
+      tr.appendChild(tdMasa);
+
+      const tdTujuan = document.createElement('td');
+      tdTujuan.style.padding = '8px';
+      tdTujuan.textContent = b.tujuan;
+      tr.appendChild(tdTujuan);
+
+      const tdPenempah = document.createElement('td');
+      tdPenempah.style.padding = '8px';
+      tdPenempah.textContent = b.nama_penempah;
+      tr.appendChild(tdPenempah);
+
+      const tdAction = document.createElement('td');
+      tdAction.style.cssText = 'padding:8px;text-align:center';
+      const btnEdit = document.createElement('button');
+      btnEdit.type = 'button';
+      btnEdit.className = 'btn-edit';
+      btnEdit.dataset.id = b.id;
+      btnEdit.style.cssText = 'border:none;background:none;cursor:pointer;min-height:36px;';
+      btnEdit.textContent = '✏️';
+      btnEdit.onclick = () => openEditModal(btnEdit.dataset.id);
+      tdAction.appendChild(btnEdit);
+      tr.appendChild(tdAction);
+
+      tbody.appendChild(tr);
+    });
+
+    table.appendChild(tbody);
+    listDiv.appendChild(table);
+
+    const chkAllDynamic = $('chkAllDynamic');
+    if (chkAllDynamic) {
+      chkAllDynamic.addEventListener('change', (e) => {
+        document.querySelectorAll('.chk-item').forEach(c => { c.checked = e.target.checked; });
+      });
+    }
+  } catch (err) {
+    if (controller.signal.aborted) return;
+    if (isDatabaseConnectionError(err)) {
+      activateMaintenanceMode(err.message);
+    }
   }
 }
 
 async function executeBulkCancel() {
+  if (state.isDatabaseUnavailable) return;
+
   const checked = document.querySelectorAll('.chk-item:checked');
   if (checked.length === 0) return toastWarn('Pilih sekurang-kurangnya satu tempahan.');
 
@@ -2964,8 +3614,11 @@ async function executeBulkCancel() {
     'Batal'
   );
 
-  if (!form || !form.reason) return;
-  if (!supaClient) return toastErr('Perkhidmatan belum bersedia.');
+  if (!form || !form.reason || state.isDatabaseUnavailable) return;
+  if (!supaClient) {
+    activateMaintenanceMode('Perkhidmatan pangkalan data tidak tersedia.');
+    return;
+  }
 
   const isConfirmed = await modalConfirm(
     'Sahkan Pembatalan Pukal?',
@@ -2975,30 +3628,46 @@ async function executeBulkCancel() {
     true
   );
 
-  if (!isConfirmed) return;
+  if (!isConfirmed || state.isDatabaseUnavailable) return;
 
   modalLoading('Membatalkan...');
-  const { data } = await supaClient.rpc('fn_delete_booking_bulk_secure_v2', {
-    p_ids: ids,
-    p_email: state.user.email,
-    p_reason: form.reason,
-    p_session_token: getSessionToken()
-  });
-  modalClose();
+  try {
+    const { data, error } = await supaClient.rpc('fn_delete_booking_bulk_secure_v2', {
+      p_ids: ids,
+      p_email: state.user.email,
+      p_reason: form.reason,
+      p_session_token: getSessionToken()
+    });
+    modalClose();
 
-  if (data && data.ok) {
-    toastOk(`${data.updated} tempahan dibatalkan.`);
-    await clearActiveCaches();
-    loadAdminBookingList();
-    loadMyBookings(false);
-    if (state.room) refreshCalendar(false);
-    loadOverview(false);
-  } else {
-    await modalAlert('Ralat', (data && data.error) || 'Gagal melaksanakan pembatalan pukal.');
+    if (error && isDatabaseConnectionError(error)) {
+      activateMaintenanceMode(error.message);
+      return;
+    }
+
+    if (data && data.ok) {
+      toastOk(`${data.updated} tempahan dibatalkan.`);
+      await clearActiveCaches();
+      loadAdminBookingList();
+      loadMyBookings(false);
+      if (state.room) refreshCalendar(false);
+      loadOverview(false);
+    } else {
+      await modalAlert('Ralat', (data && data.error) || (error && error.message) || 'Gagal melaksanakan pembatalan pukal.');
+    }
+  } catch (err) {
+    modalClose();
+    if (isDatabaseConnectionError(err)) {
+      activateMaintenanceMode(err.message);
+      return;
+    }
+    await modalAlert('Ralat', (err && err.message) || 'Gagal melaksanakan pembatalan pukal.');
   }
 }
 
 async function openEditModal(id) {
+  if (state.isDatabaseUnavailable) return;
+
   const b = adminState.bookings.find(x => x.id === id);
   if (!b) return;
 
@@ -3013,6 +3682,8 @@ async function openEditModal(id) {
 }
 
 async function executeAdminSearch() {
+  if (state.isDatabaseUnavailable) return;
+
   const startDateEl = $('adminSearchStartDate');
   const endDateEl = $('adminSearchEndDate');
   const roomEl = $('adminSearchRoom');
@@ -3030,7 +3701,10 @@ async function executeAdminSearch() {
     return toastWarn('Tarikh mula mesti sebelum atau sama dengan tarikh akhir');
   }
 
-  if (!supaClient) return;
+  if (!supaClient) {
+    activateMaintenanceMode('Perkhidmatan pangkalan data tidak tersedia.');
+    return;
+  }
 
   if (adminSearchAbortController) {
     adminSearchAbortController.abort();
@@ -3056,44 +3730,58 @@ async function executeAdminSearch() {
 
   modalLoading('Mencari rekod...');
 
-  let query = supaClient
-    .from('v_bookings_active')
-    .select('*')
-    .gte('tarikh', startDate)
-    .lte('tarikh', endDate)
-    .order('tarikh', { ascending: true })
-    .order('masa_mula', { ascending: true });
+  try {
+    let query = supaClient
+      .from('v_bookings_active')
+      .select('*')
+      .gte('tarikh', startDate)
+      .lte('tarikh', endDate)
+      .order('tarikh', { ascending: true })
+      .order('masa_mula', { ascending: true });
 
-  if (room) {
-    query = query.eq('bilik', room);
+    if (room) {
+      query = query.eq('bilik', room);
+    }
+
+    if (typeof query.abortSignal === 'function') {
+      query = query.abortSignal(controller.signal);
+    }
+
+    const { data, error } = await query;
+
+    if (controller.signal.aborted || state.isDatabaseUnavailable) return;
+
+    modalClose();
+    clearElementChildren(tbody);
+
+    if (error) {
+      if (isDatabaseConnectionError(error)) {
+        activateMaintenanceMode(error.message);
+        return;
+      }
+      const tr = document.createElement('tr');
+      const td = document.createElement('td');
+      td.colSpan = 7;
+      td.style.cssText = 'text-align:center;color:red';
+      td.textContent = 'Ralat memuatkan carian.';
+      tr.appendChild(td);
+      tbody.appendChild(tr);
+      return toastErr('Gagal membuat carian');
+    }
+
+    adminState.searchData = data || [];
+
+    populateAdminSearchUserFilter();
+    renderAdminSearchTable();
+  } catch (err) {
+    if (controller.signal.aborted) return;
+    modalClose();
+    if (isDatabaseConnectionError(err)) {
+      activateMaintenanceMode(err.message);
+      return;
+    }
+    toastErr('Gagal membuat carian');
   }
-
-  if (typeof query.abortSignal === 'function') {
-    query = query.abortSignal(controller.signal);
-  }
-
-  const { data, error } = await query;
-
-  if (controller.signal.aborted) return;
-
-  modalClose();
-  clearElementChildren(tbody);
-
-  if (error) {
-    const tr = document.createElement('tr');
-    const td = document.createElement('td');
-    td.colSpan = 7;
-    td.style.cssText = 'text-align:center;color:red';
-    td.textContent = 'Ralat memuatkan carian.';
-    tr.appendChild(td);
-    tbody.appendChild(tr);
-    return toastErr('Gagal membuat carian');
-  }
-
-  adminState.searchData = data || [];
-
-  populateAdminSearchUserFilter();
-  renderAdminSearchTable();
 }
 
 function populateAdminSearchUserFilter() {
@@ -3253,6 +3941,8 @@ function renderAdminSearchTable() {
 }
 
 async function openAdminSearchEditModal(id, searchData) {
+  if (state.isDatabaseUnavailable) return;
+
   const b = searchData.find(x => x.booking_id === id);
   if (!b) return;
 
